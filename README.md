@@ -4,7 +4,6 @@ Adamantite — Security. Locked Tight.
 Adamantite — Security, Done Right.  
 Keep It Tight. Keep It Adamantite.  
 
-| 1 | 2 | 3 | 4 |
 |---|---|---|---|
 | ![adamantite1](adamantite1.jpeg) | ![adamantite2](adamantite2.jpeg) | ![adamantite3](adamantite3.jpeg) | ![adamantite4](adamantite4.jpeg) |
 
