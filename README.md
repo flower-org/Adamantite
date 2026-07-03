@@ -4,6 +4,11 @@ Adamantite — Security. Locked Tight.
 Adamantite — Security, Done Right.  
 Keep It Tight. Keep It Adamantite.  
 
+| 1 | 2 | 3 | 4 |
+|---|---|---|---|
+| ![adamantite1](adamantite1.jpeg) | ![adamantite2](adamantite2.jpeg) | ![adamantite3](adamantite3.jpeg) | ![adamantite4](adamantite4.jpeg) |
+
+
 ## А для чего нужен микророутер? Какими запросами он занимается?
 
 Роутеры в наше время это одно из самых слабых мест в защите, и хуже всего, что из-за их внутренней сложности они предоставляют огромный attack surface. Также старые модели очень быстро забрасывают и не выпускают обновлений, а новые уязвимости там находят, еще там есть проприетарные блобы, которые для вас закрыты, а хакеры могут уметь их ломать, внедрять туда зловреды, а официально просто нет возможности что-то с этим сделать, а реверс-инжинирить и фиксать чужое закрытое железо и код это не всем корпорациям под силу, не говоря уже о частных лицах.
@@ -51,7 +56,3 @@ Keep It Tight. Keep It Adamantite.
 
 Возможно использование названий:  
 Adamantite, Адамантит, Адамантин, Адамант, Камень.
-
-| 1 | 2 | 3 | 4 |
-|---|---|---|---|
-| ![adamantite1](adamantite1.jpeg) | ![adamantite2](adamantite2.jpeg) | ![adamantite3](adamantite3.jpeg) | ![adamantite4](adamantite4.jpeg) |
