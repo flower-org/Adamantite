@@ -51,3 +51,5 @@ Keep It Tight. Keep It Adamantite.
 
 Возможно использование названий:  
 Adamantite, Адамантит, Адамантин, Адамант, Камень.
+
+![adamantite1](adamantite1.jpeg) ![adamantite2](adamantite2.jpeg) ![adamantite3](adamantite3.jpeg) ![adamantite4](adamantite4.jpeg)
