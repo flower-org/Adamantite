@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usbd_cdc_if.h"
 
 /* USER CODE END Includes */
 
@@ -32,6 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define HELLO_PERIOD_MS 1000U
 
 /* USER CODE END PD */
 
@@ -43,6 +45,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+static uint8_t hello_message[] = "hello\r\n";
 
 /* USER CODE END PV */
 
@@ -112,11 +115,29 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_blink_tick = HAL_GetTick();
+  uint32_t last_hello_tick = HAL_GetTick();
+
   while (1)
   {
     /* USER CODE END WHILE */
-    HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
-	HAL_Delay (1000);
+    uint32_t now = HAL_GetTick();
+
+    if ((now - last_blink_tick) >= HELLO_PERIOD_MS)
+    {
+      last_blink_tick = now;
+      HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
+    }
+
+    if ((now - last_hello_tick) >= HELLO_PERIOD_MS)
+    {
+      last_hello_tick = now;
+
+      if (USB_CDC_IsConfigured() != 0U)
+      {
+        (void)CDC_Transmit_HS(hello_message, (uint16_t)(sizeof(hello_message) - 1U));
+      }
+    }
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
