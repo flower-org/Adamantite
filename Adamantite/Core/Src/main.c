@@ -44,6 +44,8 @@
 
 /* USER CODE BEGIN PV */
 static const uint8_t usbHelloMsg[] = "Hello from Adamantite STM32H723!\r\n";
+static uint32_t lastLedTick = 0;
+static uint32_t lastUsbTick = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -114,8 +116,6 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    static uint32_t lastLedTick = 0;
-    static uint32_t lastUsbTick = 0;
     uint32_t now = HAL_GetTick();
 
     if ((now - lastLedTick) >= 500U)
