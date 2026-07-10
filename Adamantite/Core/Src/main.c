@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usb_device.h"
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,6 +49,7 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
+void LED_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -96,6 +98,7 @@ int main(void)
   SystemClock_Config();
 
   LED_Init();             // initialize PG7 LED
+  MX_USB_DEVICE_Init();
 
   /* USER CODE BEGIN SysInit */
 
@@ -111,8 +114,22 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
-	HAL_Delay (1000);
+    static uint32_t lastLedTick = 0;
+    static uint32_t lastUsbTick = 0;
+    uint32_t now = HAL_GetTick();
+
+    if ((now - lastLedTick) >= 500U)
+    {
+      lastLedTick = now;
+      HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
+    }
+
+    if ((now - lastUsbTick) >= 2000U)
+    {
+      uint8_t msg[] = "Hello from Adamantite STM32H723!\r\n";
+      lastUsbTick = now;
+      CDC_Transmit_FS(msg, sizeof(msg) - 1U);
+    }
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -126,6 +143,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
   /** Supply configuration update enable
   */
@@ -140,11 +158,19 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_HSI48;
   RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
   RCC_OscInitStruct.HSICalibrationValue = 64;
+  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_USB;
+  PeriphClkInitStruct.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
