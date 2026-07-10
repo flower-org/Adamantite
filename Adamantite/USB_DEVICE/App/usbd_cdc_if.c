@@ -42,8 +42,14 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
-  uint8_t txStatus = CDC_Transmit_FS(Buf, (uint16_t)(*Len));
+  uint16_t txLen = (*Len > 0xFFFFU) ? 0xFFFFU : (uint16_t)(*Len);
+  uint8_t txStatus = CDC_Transmit_FS(Buf, txLen);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+
+  if (txStatus == (uint8_t)USBD_BUSY)
+  {
+    return (int8_t)USBD_BUSY;
+  }
 
   if (txStatus == (uint8_t)USBD_FAIL)
   {

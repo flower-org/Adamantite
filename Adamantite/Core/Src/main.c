@@ -118,13 +118,13 @@ int main(void)
     /* USER CODE END WHILE */
     uint32_t now = HAL_GetTick();
 
-    if ((now - lastLedTick) >= 500U)
+    if ((int32_t)(now - lastLedTick) >= 500)
     {
       lastLedTick = now;
       HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
     }
 
-    if ((now - lastUsbTick) >= 2000U)
+    if ((int32_t)(now - lastUsbTick) >= 2000)
     {
       if (CDC_Transmit_FS((uint8_t *)usbHelloMsg, sizeof(usbHelloMsg) - 1U) == (uint8_t)USBD_OK)
       {
