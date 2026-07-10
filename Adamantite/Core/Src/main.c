@@ -126,7 +126,7 @@ int main(void)
 
     if ((int32_t)(now - lastUsbTick) >= 2000)
     {
-      if (CDC_Transmit_FS((uint8_t *)usbHelloMsg, sizeof(usbHelloMsg) - 1U) == (uint8_t)USBD_OK)
+      if (CDC_Transmit_FS(usbHelloMsg, sizeof(usbHelloMsg) - 1U) == (uint8_t)USBD_OK)
       {
         lastUsbTick = now;
       }
