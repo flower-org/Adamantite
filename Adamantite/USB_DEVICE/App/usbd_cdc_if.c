@@ -288,7 +288,7 @@ uint8_t CDC_Transmit_HS(uint8_t* Buf, uint16_t Len)
     return USBD_FAIL;
   }
 
-  if ((hUsbDeviceHS.dev_state != USBD_STATE_CONFIGURED) || (hUsbDeviceHS.pClassData == NULL))
+  if ((hUsbDeviceHS.pClassData == NULL) || (hUsbDeviceHS.dev_state != USBD_STATE_CONFIGURED))
   {
     return USBD_BUSY;
   }
