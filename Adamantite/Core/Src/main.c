@@ -43,7 +43,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static const uint8_t usbHelloMsg[] = "Hello from Adamantite STM32H723!\r\n";
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -126,9 +126,10 @@ int main(void)
 
     if ((now - lastUsbTick) >= 2000U)
     {
-      uint8_t msg[] = "Hello from Adamantite STM32H723!\r\n";
-      lastUsbTick = now;
-      CDC_Transmit_FS(msg, sizeof(msg) - 1U);
+      if (CDC_Transmit_FS((uint8_t *)usbHelloMsg, sizeof(usbHelloMsg) - 1U) == USBD_OK)
+      {
+        lastUsbTick = now;
+      }
     }
     /* USER CODE BEGIN 3 */
   }
