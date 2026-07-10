@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define HELLO_PERIOD_MS 1000U
+#define DEMO_PERIOD_MS 1000U
 
 /* USER CODE END PD */
 
@@ -115,23 +115,17 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_blink_tick = HAL_GetTick();
-  uint32_t last_hello_tick = HAL_GetTick();
+  uint32_t last_demo_tick = HAL_GetTick();
 
   while (1)
   {
     /* USER CODE END WHILE */
     uint32_t now = HAL_GetTick();
 
-    if ((now - last_blink_tick) >= HELLO_PERIOD_MS)
+    if ((now - last_demo_tick) >= DEMO_PERIOD_MS)
     {
-      last_blink_tick = now;
+      last_demo_tick = now;
       HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
-    }
-
-    if ((now - last_hello_tick) >= HELLO_PERIOD_MS)
-    {
-      last_hello_tick = now;
 
       if (USB_CDC_IsConfigured() != 0U)
       {
