@@ -37,9 +37,10 @@
 /* USER CODE BEGIN PD */
 #define ETH_RX_BUFFER_SIZE 1536U
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
+#define DEMO_ETH_MAC_ADDR_LEN 6U
 #define DEMO_ETH_HEADER_LEN 14U
-#define DEMO_ETH_SOURCE_MAC_OFFSET 6U
-#define DEMO_ETH_MIN_RX_CHECK_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
+#define DEMO_ETH_SOURCE_MAC_OFFSET DEMO_ETH_MAC_ADDR_LEN
+#define DEMO_ETH_MIN_RX_CHECK_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + DEMO_ETH_MAC_ADDR_LEN)
 #define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
 #define DEMO_ETH_TX_TIMEOUT_MS 20U
 #define DEMO_ETHERTYPE_CUSTOM 0x88B5U
@@ -78,7 +79,7 @@ static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
 static ETH_BufferTypeDef EthRxBufferNodes[ETH_RX_DESC_CNT];
 static uint8_t demo_usb_message[DEMO_USB_MESSAGE_MAX_LEN];
 static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
-static const uint8_t demo_tx_payload[] = "adamantite-demo";
+static const uint8_t demo_tx_payload[] = {'a', 'd', 'a', 'm', 'a', 'n', 't', 'i', 't', 'e', '-', 'd', 'e', 'm', 'o'};
 static uint8_t demo_tx_sent = 0U;
 static uint64_t demo_packet_count = 0U;
 
@@ -243,8 +244,8 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
 
   frame_len = DEMO_ETH_HEADER_LEN + payload_len;
 
-  memcpy(&demo_eth_tx_frame[0], destination_mac, 6U);
-  memcpy(&demo_eth_tx_frame[6], heth.Init.MACAddr, 6U);
+  memcpy(&demo_eth_tx_frame[0], destination_mac, DEMO_ETH_MAC_ADDR_LEN);
+  memcpy(&demo_eth_tx_frame[DEMO_ETH_SOURCE_MAC_OFFSET], heth.Init.MACAddr, DEMO_ETH_MAC_ADDR_LEN);
   demo_eth_tx_frame[12] = (uint8_t)(ether_type >> 8);
   demo_eth_tx_frame[13] = (uint8_t)(ether_type & 0xFFU);
 
@@ -266,7 +267,7 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
     return DEMO_LAN_TX_OK;
   }
 
-  if (((heth.ErrorCode & ~error_before) & HAL_ETH_ERROR_BUSY) != 0U)
+  if (((heth.ErrorCode & ~error_before) & HAL_ETH_ERROR_BUSY) != 0U) /* check errors raised by this transmit call */
   {
     return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
   }
@@ -291,7 +292,7 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
   tx_status = Demo_SendRawEthernetFrame(source_mac,
                                         DEMO_ETHERTYPE_CUSTOM,
                                         demo_tx_payload,
-                                        ((uint16_t)sizeof(demo_tx_payload) - 1U));
+                                        (uint16_t)sizeof(demo_tx_payload));
 
   if (tx_status == DEMO_LAN_TX_OK)
   {
