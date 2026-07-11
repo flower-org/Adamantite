@@ -229,10 +229,13 @@ static void Demo_ProcessLanPackets(void)
 {
   void *rx_packet = NULL;
 
-  while (HAL_ETH_ReadData(&heth, &rx_packet) == HAL_OK)
+  uint32_t desccount;
+  while (HAL_ETH_ReadData(&heth, &rx_packet, &desccount) == HAL_OK)
   {
     Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
     rx_packet = NULL;
+
+    HAL_ETH_Extension_ReturnRxDescriptor(&heth, desccount);
   }
 }
 

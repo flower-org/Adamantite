@@ -1735,7 +1735,8 @@ HAL_StatusTypeDef HAL_ETH_Start_IT(ETH_HandleTypeDef *heth);
 HAL_StatusTypeDef HAL_ETH_Stop(ETH_HandleTypeDef *heth);
 HAL_StatusTypeDef HAL_ETH_Stop_IT(ETH_HandleTypeDef *heth);
 
-HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff);
+HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff, uint32_t* desccnt_out);
+void HAL_ETH_Extension_ReturnRxDescriptor(ETH_HandleTypeDef *heth, uint32_t desccnt);
 HAL_StatusTypeDef HAL_ETH_RegisterRxAllocateCallback(ETH_HandleTypeDef *heth,
                                                      pETH_rxAllocateCallbackTypeDef rxAllocateCallback);
 HAL_StatusTypeDef HAL_ETH_UnRegisterRxAllocateCallback(ETH_HandleTypeDef *heth);
