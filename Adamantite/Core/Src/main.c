@@ -39,7 +39,7 @@
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
 #define DEMO_ETH_HEADER_LEN 14U
 #define DEMO_ETH_SOURCE_MAC_OFFSET 6U
-#define DEMO_ETH_MIN_FRAME_WITH_MAC (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
+#define DEMO_ETH_MIN_FRAME_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
 #define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
 #define DEMO_ETH_TX_TIMEOUT_MS 20U
 #define DEMO_ETHERTYPE_CUSTOM 0x88B5U
@@ -78,6 +78,7 @@ static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
 static ETH_BufferTypeDef EthRxBufferNodes[ETH_RX_DESC_CNT];
 static uint8_t demo_usb_message[DEMO_USB_MESSAGE_MAX_LEN];
 static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
+static const uint8_t demo_tx_payload[] = "adamantite-demo";
 static uint8_t demo_tx_sent = 0U;
 static uint64_t demo_packet_count = 0U;
 
@@ -226,8 +227,8 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
                                           const uint8_t *payload,
                                           uint16_t payload_len)
 {
+  uint32_t error_before;
   uint16_t frame_len;
-  const uint8_t *source_mac;
   ETH_BufferTypeDef tx_buffer;
 
   if ((destination_mac == NULL) || ((payload_len > 0U) && (payload == NULL)))
@@ -240,16 +241,10 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
     return DEMO_LAN_TX_INVALID_ARGUMENT;
   }
 
-  source_mac = heth.Init.MACAddr;
-  if (source_mac == NULL)
-  {
-    return DEMO_LAN_TX_ERROR;
-  }
-
   frame_len = DEMO_ETH_HEADER_LEN + payload_len;
 
   memcpy(&demo_eth_tx_frame[0], destination_mac, 6U);
-  memcpy(&demo_eth_tx_frame[6], source_mac, 6U);
+  memcpy(&demo_eth_tx_frame[6], heth.Init.MACAddr, 6U);
   demo_eth_tx_frame[12] = (uint8_t)(ether_type >> 8);
   demo_eth_tx_frame[13] = (uint8_t)(ether_type & 0xFFU);
 
@@ -265,10 +260,15 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
   TxConfig.Length = frame_len;
   TxConfig.TxBuffer = &tx_buffer;
 
-  heth.ErrorCode = HAL_ETH_ERROR_NONE;
+  error_before = heth.ErrorCode;
   if (HAL_ETH_Transmit(&heth, &TxConfig, DEMO_ETH_TX_TIMEOUT_MS) == HAL_OK)
   {
     return DEMO_LAN_TX_OK;
+  }
+
+  if (((heth.ErrorCode & ~error_before) & HAL_ETH_ERROR_BUSY) != 0U)
+  {
+    return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
   }
 
   if ((heth.ErrorCode & HAL_ETH_ERROR_BUSY) != 0U)
@@ -281,14 +281,12 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
 
 static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
 {
-  static const uint8_t demo_payload[] = "adamantite-demo";
-  static const uint16_t demo_payload_len = (uint16_t)(sizeof(demo_payload) - 1U);
   DemoLanTxStatus tx_status;
   const uint8_t *frame;
   const uint8_t *source_mac;
 
   if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) ||
-      (rx_packet->len < DEMO_ETH_MIN_FRAME_WITH_MAC))
+      (rx_packet->len < DEMO_ETH_MIN_FRAME_LEN))
   {
     return;
   }
@@ -297,8 +295,8 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
   source_mac = &frame[DEMO_ETH_SOURCE_MAC_OFFSET];
   tx_status = Demo_SendRawEthernetFrame(source_mac,
                                         DEMO_ETHERTYPE_CUSTOM,
-                                        demo_payload,
-                                        demo_payload_len);
+                                        demo_tx_payload,
+                                        (uint16_t)(sizeof(demo_tx_payload) - 1U));
 
   if (tx_status == DEMO_LAN_TX_OK)
   {
