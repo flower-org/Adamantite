@@ -38,6 +38,8 @@
 #define ETH_RX_BUFFER_SIZE 1536U
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
 #define DEMO_ETH_HEADER_LEN 14U
+#define DEMO_ETH_SOURCE_MAC_OFFSET 6U
+#define DEMO_ETH_MIN_FRAME_WITH_MAC (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
 #define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
 #define DEMO_ETH_TX_TIMEOUT_MS 20U
 #define DEMO_ETHERTYPE_CUSTOM 0x88B5U
@@ -280,19 +282,23 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
 static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
 {
   static const uint8_t demo_payload[] = "adamantite-demo";
+  static const uint16_t demo_payload_len = (uint16_t)(sizeof(demo_payload) - 1U);
   DemoLanTxStatus tx_status;
   const uint8_t *frame;
+  const uint8_t *source_mac;
 
-  if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) || (rx_packet->len < 12U))
+  if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) ||
+      (rx_packet->len < DEMO_ETH_MIN_FRAME_WITH_MAC))
   {
     return;
   }
 
   frame = rx_packet->buffer;
-  tx_status = Demo_SendRawEthernetFrame(&frame[6],
+  source_mac = &frame[DEMO_ETH_SOURCE_MAC_OFFSET];
+  tx_status = Demo_SendRawEthernetFrame(source_mac,
                                         DEMO_ETHERTYPE_CUSTOM,
                                         demo_payload,
-                                        (uint16_t)(sizeof(demo_payload) - 1U));
+                                        demo_payload_len);
 
   if (tx_status == DEMO_LAN_TX_OK)
   {
