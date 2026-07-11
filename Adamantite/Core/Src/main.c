@@ -37,6 +37,10 @@
 /* USER CODE BEGIN PD */
 #define ETH_RX_BUFFER_SIZE 1536U
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
+#define DEMO_ETH_HEADER_LEN 14U
+#define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
+#define DEMO_ETH_TX_TIMEOUT_MS 20U
+#define DEMO_ETHERTYPE_CUSTOM 0x88B5U
 
 /* USER CODE END PD */
 
@@ -71,6 +75,8 @@ ETH_HandleTypeDef heth;
 static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
 static ETH_BufferTypeDef EthRxBufferNodes[ETH_RX_DESC_CNT];
 static uint8_t demo_usb_message[DEMO_USB_MESSAGE_MAX_LEN];
+static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
+static uint8_t demo_tx_sent = 0U;
 static uint64_t demo_packet_count = 0U;
 
 /* USER CODE END PV */
@@ -83,6 +89,7 @@ static void MX_ETH_Init(void);
 /* USER CODE BEGIN PFP */
 static void Demo_ProcessLanPackets(void);
 static void Demo_ReportPacketCount(void);
+static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet);
 
 /* USER CODE END PFP */
 
@@ -212,6 +219,87 @@ static void Demo_ReportPacket(const ETH_BufferTypeDef *rx_packet)
   }
 }
 
+DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
+                                          uint16_t ether_type,
+                                          const uint8_t *payload,
+                                          uint16_t payload_len)
+{
+  uint16_t frame_len;
+  const uint8_t *source_mac;
+  ETH_BufferTypeDef tx_buffer;
+
+  if ((destination_mac == NULL) || ((payload_len > 0U) && (payload == NULL)))
+  {
+    return DEMO_LAN_TX_INVALID_ARGUMENT;
+  }
+
+  if (payload_len > DEMO_ETH_MAX_PAYLOAD_LEN)
+  {
+    return DEMO_LAN_TX_INVALID_ARGUMENT;
+  }
+
+  source_mac = heth.Init.MACAddr;
+  if (source_mac == NULL)
+  {
+    return DEMO_LAN_TX_ERROR;
+  }
+
+  frame_len = DEMO_ETH_HEADER_LEN + payload_len;
+
+  memcpy(&demo_eth_tx_frame[0], destination_mac, 6U);
+  memcpy(&demo_eth_tx_frame[6], source_mac, 6U);
+  demo_eth_tx_frame[12] = (uint8_t)(ether_type >> 8);
+  demo_eth_tx_frame[13] = (uint8_t)(ether_type & 0xFFU);
+
+  if (payload_len > 0U)
+  {
+    memcpy(&demo_eth_tx_frame[DEMO_ETH_HEADER_LEN], payload, payload_len);
+  }
+
+  tx_buffer.buffer = demo_eth_tx_frame;
+  tx_buffer.len = frame_len;
+  tx_buffer.next = NULL;
+
+  TxConfig.Length = frame_len;
+  TxConfig.TxBuffer = &tx_buffer;
+
+  heth.ErrorCode = HAL_ETH_ERROR_NONE;
+  if (HAL_ETH_Transmit(&heth, &TxConfig, DEMO_ETH_TX_TIMEOUT_MS) == HAL_OK)
+  {
+    return DEMO_LAN_TX_OK;
+  }
+
+  if ((heth.ErrorCode & HAL_ETH_ERROR_BUSY) != 0U)
+  {
+    return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
+  }
+
+  return DEMO_LAN_TX_ERROR;
+}
+
+static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
+{
+  static const uint8_t demo_payload[] = "adamantite-demo";
+  DemoLanTxStatus tx_status;
+  const uint8_t *frame;
+
+  if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) || (rx_packet->len < 12U))
+  {
+    return;
+  }
+
+  frame = rx_packet->buffer;
+  tx_status = Demo_SendRawEthernetFrame(&frame[6],
+                                        DEMO_ETHERTYPE_CUSTOM,
+                                        demo_payload,
+                                        (uint16_t)(sizeof(demo_payload) - 1U));
+
+  if (tx_status == DEMO_LAN_TX_OK)
+  {
+    demo_tx_sent = 1U;
+  }
+}
+
 /*static void Demo_ProcessLanPackets(void)
 {
   void *rx_packet = NULL;
@@ -231,6 +319,7 @@ static void Demo_ProcessLanPackets(void)
 
   while (HAL_ETH_ReadData(&heth, &rx_packet) == HAL_OK)
   {
+    Demo_TrySendFrameFromRx((ETH_BufferTypeDef *)rx_packet);
     Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
     rx_packet = NULL;
   }
