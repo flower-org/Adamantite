@@ -37,6 +37,13 @@
 /* USER CODE BEGIN PD */
 #define ETH_RX_BUFFER_SIZE 1536U
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
+#define DEMO_ETH_MAC_ADDR_LEN 6U
+#define DEMO_ETH_HEADER_LEN 14U
+#define DEMO_ETH_SOURCE_MAC_OFFSET DEMO_ETH_MAC_ADDR_LEN
+#define DEMO_ETH_MIN_RX_CHECK_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + DEMO_ETH_MAC_ADDR_LEN)
+#define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
+#define DEMO_ETH_TX_TIMEOUT_MS 20U
+#define DEMO_ETHERTYPE_CUSTOM 0x88B5U
 
 /* USER CODE END PD */
 
@@ -71,6 +78,9 @@ ETH_HandleTypeDef heth;
 static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
 static ETH_BufferTypeDef EthRxBufferNodes[ETH_RX_DESC_CNT];
 static uint8_t demo_usb_message[DEMO_USB_MESSAGE_MAX_LEN];
+static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
+static const uint8_t demo_tx_payload[] = {'a', 'd', 'a', 'm', 'a', 'n', 't', 'i', 't', 'e', '-', 'd', 'e', 'm', 'o'};
+static uint8_t demo_tx_sent = 0U;
 static uint64_t demo_packet_count = 0U;
 
 /* USER CODE END PV */
@@ -83,6 +93,7 @@ static void MX_ETH_Init(void);
 /* USER CODE BEGIN PFP */
 static void Demo_ProcessLanPackets(void);
 static void Demo_ReportPacketCount(void);
+static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet);
 
 /* USER CODE END PFP */
 
@@ -212,6 +223,83 @@ static void Demo_ReportPacket(const ETH_BufferTypeDef *rx_packet)
   }
 }
 
+DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
+                                          uint16_t ether_type,
+                                          const uint8_t *payload,
+                                          uint16_t payload_len)
+{
+  uint32_t error_before;
+  uint16_t frame_len;
+  ETH_BufferTypeDef tx_buffer;
+
+  if ((destination_mac == NULL) || ((payload_len > 0U) && (payload == NULL)))
+  {
+    return DEMO_LAN_TX_INVALID_ARGUMENT;
+  }
+
+  if (payload_len > DEMO_ETH_MAX_PAYLOAD_LEN)
+  {
+    return DEMO_LAN_TX_INVALID_ARGUMENT;
+  }
+
+  frame_len = DEMO_ETH_HEADER_LEN + payload_len;
+
+  memcpy(&demo_eth_tx_frame[0], destination_mac, DEMO_ETH_MAC_ADDR_LEN);
+  memcpy(&demo_eth_tx_frame[DEMO_ETH_SOURCE_MAC_OFFSET], heth.Init.MACAddr, DEMO_ETH_MAC_ADDR_LEN);
+  demo_eth_tx_frame[12] = (uint8_t)(ether_type >> 8);
+  demo_eth_tx_frame[13] = (uint8_t)(ether_type & 0xFFU);
+
+  if (payload_len > 0U)
+  {
+    memcpy(&demo_eth_tx_frame[DEMO_ETH_HEADER_LEN], payload, payload_len);
+  }
+
+  tx_buffer.buffer = demo_eth_tx_frame;
+  tx_buffer.len = frame_len;
+  tx_buffer.next = NULL;
+
+  TxConfig.Length = frame_len;
+  TxConfig.TxBuffer = &tx_buffer;
+
+  error_before = heth.ErrorCode;
+  if (HAL_ETH_Transmit(&heth, &TxConfig, DEMO_ETH_TX_TIMEOUT_MS) == HAL_OK)
+  {
+    return DEMO_LAN_TX_OK;
+  }
+
+  if (((heth.ErrorCode & ~error_before) & HAL_ETH_ERROR_BUSY) != 0U) /* check errors raised by this transmit call */
+  {
+    return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
+  }
+
+  return DEMO_LAN_TX_ERROR;
+}
+
+static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
+{
+  DemoLanTxStatus tx_status;
+  const uint8_t *frame;
+  const uint8_t *source_mac;
+
+  if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) ||
+      (rx_packet->len < DEMO_ETH_MIN_RX_CHECK_LEN))
+  {
+    return;
+  }
+
+  frame = rx_packet->buffer;
+  source_mac = &frame[DEMO_ETH_SOURCE_MAC_OFFSET];
+  tx_status = Demo_SendRawEthernetFrame(source_mac,
+                                        DEMO_ETHERTYPE_CUSTOM,
+                                        demo_tx_payload,
+                                        (uint16_t)sizeof(demo_tx_payload));
+
+  if (tx_status == DEMO_LAN_TX_OK)
+  {
+    demo_tx_sent = 1U;
+  }
+}
+
 /*static void Demo_ProcessLanPackets(void)
 {
   void *rx_packet = NULL;
@@ -232,6 +320,7 @@ static void Demo_ProcessLanPackets(void)
   uint32_t desccount;
   while (HAL_ETH_ReadData(&heth, &rx_packet, &desccount) == HAL_OK)
   {
+    Demo_TrySendFrameFromRx((ETH_BufferTypeDef *)rx_packet);
     Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
     rx_packet = NULL;
 

@@ -36,6 +36,13 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef enum
+{
+  DEMO_LAN_TX_OK = 0,
+  DEMO_LAN_TX_INVALID_ARGUMENT,
+  DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE,
+  DEMO_LAN_TX_ERROR
+} DemoLanTxStatus;
 
 /* USER CODE END ET */
 
@@ -53,6 +60,10 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
+                                          uint16_t ether_type,
+                                          const uint8_t *payload,
+                                          uint16_t payload_len);
 
 /* USER CODE END EFP */
 
