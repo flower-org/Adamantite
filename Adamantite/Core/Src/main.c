@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include <stdio.h>
 #include "string.h"
 #include "usb_device.h"
 
@@ -34,7 +35,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DEMO_PERIOD_MS 1000U
+#define ETH_RX_BUFFER_SIZE 1536U
+#define DEMO_USB_MESSAGE_MAX_LEN 64U
 
 /* USER CODE END PD */
 
@@ -66,7 +68,9 @@ ETH_TxPacketConfig TxConfig;
 ETH_HandleTypeDef heth;
 
 /* USER CODE BEGIN PV */
-static uint8_t hello_message[] = "hello\r\n";
+static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
+static uint8_t demo_usb_message[DEMO_USB_MESSAGE_MAX_LEN];
+static uint64_t demo_packet_count = 0U;
 
 /* USER CODE END PV */
 
@@ -76,11 +80,99 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ETH_Init(void);
 /* USER CODE BEGIN PFP */
+static void Demo_ProcessLanPackets(void);
+static void Demo_ReportPacketCount(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_ETH_RxAllocateCallback(uint8_t **buff)
+{
+  static uint32_t rx_buffer_index = 0U;
+
+  if (buff == NULL)
+  {
+    return;
+  }
+
+  *buff = EthRxBuffer[rx_buffer_index];
+  rx_buffer_index = (rx_buffer_index + 1U) % ETH_RX_DESC_CNT;
+}
+
+void HAL_ETH_RxLinkCallback(void **pStart, void **pEnd, uint8_t *buff, uint16_t len)
+{
+  ETH_BufferTypeDef *rx_buffer = (ETH_BufferTypeDef *)buff;
+
+  if ((pStart == NULL) || (pEnd == NULL) || (buff == NULL))
+  {
+    return;
+  }
+
+  rx_buffer->buffer = buff;
+  rx_buffer->len = len;
+  rx_buffer->next = NULL;
+
+  if (*pStart == NULL)
+  {
+    *pStart = rx_buffer;
+  }
+  else
+  {
+    ((ETH_BufferTypeDef *)(*pEnd))->next = rx_buffer;
+  }
+
+  *pEnd = rx_buffer;
+}
+
+static void Demo_ReportPacketCount(void)
+{
+  int message_len;
+
+  if (USB_CDC_IsConfigured() == 0U)
+  {
+    return;
+  }
+
+  message_len = snprintf((char *)demo_usb_message,
+                         sizeof(demo_usb_message),
+                         "got packet %lu\r\n",
+                         (unsigned long)demo_packet_count);
+
+  if (message_len <= 0)
+  {
+    return;
+  }
+
+  if ((uint32_t)message_len >= sizeof(demo_usb_message))
+  {
+    message_len = (int)(sizeof(demo_usb_message) - 1U);
+  }
+
+  (void)CDC_Transmit_HS(demo_usb_message, (uint16_t)message_len);
+}
+
+static void Demo_ProcessLanPackets(void)
+{
+  ETH_BufferTypeDef *rx_buffer = NULL;
+
+  while (HAL_ETH_IsRxDataAvailable(&heth) != 0U)
+  {
+    if (HAL_ETH_GetRxDataBuffer(&heth, &rx_buffer) != HAL_OK)
+    {
+      break;
+    }
+
+    demo_packet_count++;
+    HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
+    Demo_ReportPacketCount();
+
+    if (HAL_ETH_BuildRxDescriptors(&heth) != HAL_OK)
+    {
+      Error_Handler();
+    }
+  }
+}
 
 /* USER CODE END 0 */
 void LED_Init(void)
@@ -133,28 +225,19 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_ETH_Init();
   /* USER CODE BEGIN 2 */
+  if (HAL_ETH_Start(&heth) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_demo_tick = HAL_GetTick();
-
   while (1)
   {
     /* USER CODE END WHILE */
-    uint32_t now = HAL_GetTick();
-
-    if ((now - last_demo_tick) >= DEMO_PERIOD_MS)
-    {
-      last_demo_tick = now;
-      HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
-
-      if (USB_CDC_IsConfigured() != 0U)
-      {
-        (void)CDC_Transmit_HS(hello_message, (uint16_t)(sizeof(hello_message) - 1U));
-      }
-    }
+    Demo_ProcessLanPackets();
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -239,7 +322,7 @@ static void MX_ETH_Init(void)
   heth.Init.MediaInterface = HAL_ETH_RMII_MODE;
   heth.Init.TxDesc = DMATxDscrTab;
   heth.Init.RxDesc = DMARxDscrTab;
-  heth.Init.RxBuffLen = 1536;
+  heth.Init.RxBuffLen = ETH_RX_BUFFER_SIZE;
 
   /* USER CODE BEGIN MACADDRESS */
 
