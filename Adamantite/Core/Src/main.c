@@ -39,7 +39,7 @@
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
 #define DEMO_ETH_HEADER_LEN 14U
 #define DEMO_ETH_SOURCE_MAC_OFFSET 6U
-#define DEMO_ETH_MIN_FRAME_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
+#define DEMO_ETH_MIN_RX_CHECK_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + 6U)
 #define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
 #define DEMO_ETH_TX_TIMEOUT_MS 20U
 #define DEMO_ETHERTYPE_CUSTOM 0x88B5U
@@ -281,7 +281,7 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
   const uint8_t *source_mac;
 
   if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) ||
-      (rx_packet->len < DEMO_ETH_MIN_FRAME_LEN))
+      (rx_packet->len < DEMO_ETH_MIN_RX_CHECK_LEN))
   {
     return;
   }
@@ -291,7 +291,7 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
   tx_status = Demo_SendRawEthernetFrame(source_mac,
                                         DEMO_ETHERTYPE_CUSTOM,
                                         demo_tx_payload,
-                                        (uint16_t)(sizeof(demo_tx_payload) - 1U));
+                                        ((uint16_t)sizeof(demo_tx_payload) - 1U));
 
   if (tx_status == DEMO_LAN_TX_OK)
   {
