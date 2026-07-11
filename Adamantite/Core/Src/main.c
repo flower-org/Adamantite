@@ -42,7 +42,6 @@
 #define DEMO_ETH_SOURCE_MAC_OFFSET DEMO_ETH_MAC_ADDR_LEN
 #define DEMO_ETH_MIN_RX_CHECK_LEN (DEMO_ETH_SOURCE_MAC_OFFSET + DEMO_ETH_MAC_ADDR_LEN)
 #define DEMO_ETH_MAX_PAYLOAD_LEN 1500U
-#define DEMO_ETH_TX_TIMEOUT_MS 20U
 #define DEMO_ETHERTYPE_CUSTOM 0x88B5U
 
 /* USER CODE END PD */
@@ -94,6 +93,8 @@ static void MX_ETH_Init(void);
 static void Demo_ProcessLanPackets(void);
 static void Demo_ReportPacketCount(void);
 static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet);
+volatile uint32_t packet_leases = 0;
+volatile uint32_t g_eth_tx_done = 0;
 
 /* USER CODE END PFP */
 
@@ -138,6 +139,42 @@ void HAL_ETH_RxLinkCallback(void **pStart, void **pEnd, uint8_t *buff, uint16_t 
   *pEnd = rx_buffer;
   rx_node_index = (rx_node_index + 1U) % ETH_RX_DESC_CNT;
 }
+
+static void Demo_ReportSendingPacket(void)
+{
+	  int message_len;
+
+	  if (USB_CDC_IsConfigured() == 0U)
+	  {
+	    return;
+	  }
+
+	  message_len = snprintf((char *)demo_usb_message,
+	                         sizeof(demo_usb_message),
+	                         "SENDING PACKET! %lu\r\n",
+							 (unsigned long)g_eth_tx_done);
+
+	  if (message_len <= 0)
+	  {
+	    return;
+	  }
+
+	  if ((uint32_t)message_len >= sizeof(demo_usb_message))
+	  {
+	    message_len = (int)(sizeof(demo_usb_message) - 1U);
+	  }
+
+	  (void)CDC_Transmit_HS(demo_usb_message, (uint16_t)message_len);
+}
+
+
+void HAL_ETH_TxCpltCallback(ETH_HandleTypeDef *heth)
+{
+	  (void)heth;
+	  g_eth_tx_done++;
+	packet_leases-=1;
+}
+
 
 static void Demo_ReportPacketCount(void)
 {
@@ -262,7 +299,7 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
   TxConfig.TxBuffer = &tx_buffer;
 
   error_before = heth.ErrorCode;
-  if (HAL_ETH_Transmit(&heth, &TxConfig, DEMO_ETH_TX_TIMEOUT_MS) == HAL_OK)
+  if (HAL_ETH_Transmit_IT(&heth, &TxConfig) == HAL_OK)
   {
     return DEMO_LAN_TX_OK;
   }
@@ -277,12 +314,12 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
 
 static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
 {
+	Demo_ReportSendingPacket();
   DemoLanTxStatus tx_status;
   const uint8_t *frame;
   const uint8_t *source_mac;
 
-  if ((demo_tx_sent != 0U) || (rx_packet == NULL) || (rx_packet->buffer == NULL) ||
-      (rx_packet->len < DEMO_ETH_MIN_RX_CHECK_LEN))
+  if ((rx_packet == NULL) || (rx_packet->buffer == NULL) || (rx_packet->len < DEMO_ETH_MIN_RX_CHECK_LEN))
   {
     return;
   }
@@ -317,14 +354,20 @@ static void Demo_ProcessLanPackets(void)
 {
   void *rx_packet = NULL;
 
-  uint32_t desccount;
-  while (HAL_ETH_ReadData(&heth, &rx_packet, &desccount) == HAL_OK)
-  {
-    Demo_TrySendFrameFromRx((ETH_BufferTypeDef *)rx_packet);
-    Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
-    rx_packet = NULL;
+  uint32_t desccount = 0;
+  while (1) {
+	  if (packet_leases == 0) {
+		HAL_ETH_Extension_ReturnRxDescriptor(&heth, desccount);
 
-    HAL_ETH_Extension_ReturnRxDescriptor(&heth, desccount);
+		  if (HAL_ETH_ReadData(&heth, &rx_packet, &desccount) == HAL_OK) {
+			packet_leases=2;
+			Demo_TrySendFrameFromRx((ETH_BufferTypeDef *)rx_packet);
+			Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
+			rx_packet = NULL;
+			packet_leases-=1;
+		  }
+	  }
+
   }
 }
 
@@ -379,7 +422,8 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_ETH_Init();
   /* USER CODE BEGIN 2 */
-  if (HAL_ETH_Start(&heth) != HAL_OK)
+  // Start ETH in interrupt mode
+  if (HAL_ETH_Start_IT(&heth) != HAL_OK)
   {
     Error_Handler();
   }
