@@ -271,11 +271,6 @@ DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
     return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
   }
 
-  if ((heth.ErrorCode & HAL_ETH_ERROR_BUSY) != 0U)
-  {
-    return DEMO_LAN_TX_DESCRIPTOR_UNAVAILABLE;
-  }
-
   return DEMO_LAN_TX_ERROR;
 }
 
