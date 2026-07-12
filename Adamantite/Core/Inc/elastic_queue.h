@@ -60,6 +60,12 @@ ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n);
  */
 void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref);
 
+/**
+ * @brief Abandon an allocated reference that failed to commit.
+ *        Reclaims memory if possible, or safely marks it to be skipped.
+ */
+void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref);
+
 /* Error codes for ElasticQueue operations */
 #define ELASTIC_QUEUE_OK             0
 #define ELASTIC_QUEUE_ERR_LOCKED    -1
@@ -80,5 +86,11 @@ int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_
  * @brief Mark one operation as done. When operations reach 0, the buffer is freed.
  */
 void ElasticQueue_Done(ElasticQueue_t *q);
+
+/**
+ * @brief Abort the current read lock immediately.
+ *        Frees the locked buffer regardless of remaining operations.
+ */
+void ElasticQueue_Abort(ElasticQueue_t *q);
 
 #endif // ELASTIC_QUEUE_H

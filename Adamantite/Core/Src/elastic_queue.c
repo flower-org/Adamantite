@@ -87,11 +87,42 @@ void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref)
     }
 }
 
+void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref)
+{
+    if (!q || !ref || q->num_refs == 0) return;
+
+    size_t last_idx = (q->tail_ref == 0) ? (q->max_refs - 1) : (q->tail_ref - 1);
+    
+    if (&q->refs[last_idx] == ref) {
+        // Most recent allocation: we can safely rollback and instantly reclaim the memory
+        q->tail_ref = last_idx;
+        q->num_refs--;
+    } else {
+        // Trapped behind a newer allocation. Convert to a 0-length dummy packet.
+        // It will be reaped automatically by ElasticQueue_Lock() when it reaches the head.
+        ref->len = 0;
+        ref->is_ready = true;
+    }
+}
+
 int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_buf, size_t *out_len)
 {
+    if (!q) return ELASTIC_QUEUE_ERR_INVAL;
     if (q->is_locked) return ELASTIC_QUEUE_ERR_LOCKED;
-    if (q->num_refs == 0) return ELASTIC_QUEUE_ERR_EMPTY;
     if (num_operations == 0) return ELASTIC_QUEUE_ERR_INVAL;
+
+    // Auto-reap any abandoned packets (from ElasticQueue_Abandon)
+    while (q->num_refs > 0) {
+        ElasticQueueRef_t *first = &q->refs[q->head_ref];
+        if (first->is_ready && first->len == 0) {
+            q->head_ref = (q->head_ref + 1) % q->max_refs;
+            q->num_refs--;
+        } else {
+            break;
+        }
+    }
+
+    if (q->num_refs == 0) return ELASTIC_QUEUE_ERR_EMPTY;
 
     ElasticQueueRef_t *first = &q->refs[q->head_ref];
 
@@ -108,7 +139,7 @@ int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_
 
 void ElasticQueue_Done(ElasticQueue_t *q)
 {
-    if (!q->is_locked) return;
+    if (!q || !q->is_locked) return;
 
     if (q->remaining_ops > 0) {
         q->remaining_ops--;
@@ -120,4 +151,15 @@ void ElasticQueue_Done(ElasticQueue_t *q)
         q->head_ref = (q->head_ref + 1) % q->max_refs;
         q->num_refs--;
     }
+}
+
+void ElasticQueue_Abort(ElasticQueue_t *q)
+{
+    if (!q || !q->is_locked) return;
+
+    // Force operations to 0 and immediately free the locked buffer
+    q->remaining_ops = 0;
+    q->is_locked = false;
+    q->head_ref = (q->head_ref + 1) % q->max_refs;
+    q->num_refs--;
 }
