@@ -5,10 +5,14 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* Callback type for when a buffer is completely written and ready */
+typedef void (*ElasticQueueReadyCb_t)(void *user_data);
+
 /* Reference to a buffer allocated within the elastic queue */
 typedef struct {
-    size_t offset;
+    uint8_t *data;  // Absolute pointer to the buffer memory
     size_t len;
+    bool is_ready;  // True when DMA or background copy is finished
 } ElasticQueueRef_t;
 
 /* Elastic Queue tracking structure */
@@ -26,6 +30,10 @@ typedef struct {
     // Multi-phase locking state
     bool is_locked;
     uint32_t remaining_ops;
+
+    // Notification callback for when a buffer becomes ready
+    ElasticQueueReadyCb_t ready_cb;
+    void *ready_cb_user_data;
 } ElasticQueue_t;
 
 /**
@@ -34,17 +42,37 @@ typedef struct {
 void ElasticQueue_Init(ElasticQueue_t *q, uint8_t *area_start, size_t area_len, ElasticQueueRef_t *refs, size_t max_refs);
 
 /**
- * @brief Allocate a continuous buffer of size n. 
- *        Returns pointer to buffer or NULL if not enough space/refs.
+ * @brief Set the callback to be fired when a buffer becomes ready.
  */
-uint8_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n);
+void ElasticQueue_SetReadyCallback(ElasticQueue_t *q, ElasticQueueReadyCb_t cb, void *user_data);
+
+/**
+ * @brief Allocate a continuous buffer of size n. 
+ *        Returns pointer to the queue reference or NULL if not enough space/refs.
+ *        The newly allocated buffer is implicitly marked as NOT ready.
+ *        Use ref->data to get the actual memory pointer.
+ */
+ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n);
+
+/**
+ * @brief Mark a previously allocated buffer as fully written (ready to read).
+ *        Fires the queue's ready_cb if one is configured.
+ */
+void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref);
+
+/* Error codes for ElasticQueue operations */
+#define ELASTIC_QUEUE_OK             0
+#define ELASTIC_QUEUE_ERR_LOCKED    -1
+#define ELASTIC_QUEUE_ERR_EMPTY     -2
+#define ELASTIC_QUEUE_ERR_NOT_READY -3
+#define ELASTIC_QUEUE_ERR_INVAL     -4
 
 /**
  * @brief Lock the next available buffer for reading.
  * @param num_operations Number of ElasticQueue_Done calls required to free.
  * @param out_buf Pointer to receive the buffer start.
  * @param out_len Pointer to receive the buffer length.
- * @return 0 on success, -1 if already locked or empty.
+ * @return ELASTIC_QUEUE_OK on success, or a negative ELASTIC_QUEUE_ERR_* code on failure.
  */
 int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_buf, size_t *out_len);
 

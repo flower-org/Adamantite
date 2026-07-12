@@ -11,9 +11,17 @@ void ElasticQueue_Init(ElasticQueue_t *q, uint8_t *area_start, size_t area_len, 
     q->num_refs = 0;
     q->is_locked = false;
     q->remaining_ops = 0;
+    q->ready_cb = NULL;
+    q->ready_cb_user_data = NULL;
 }
 
-uint8_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
+void ElasticQueue_SetReadyCallback(ElasticQueue_t *q, ElasticQueueReadyCb_t cb, void *user_data)
+{
+    q->ready_cb = cb;
+    q->ready_cb_user_data = user_data;
+}
+
+ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
 {
     if (n == 0 || n > q->area_len) { return NULL; }
     if (q->num_refs >= q->max_refs) { return NULL; } // No free slots in refs array
@@ -30,14 +38,16 @@ uint8_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
         ElasticQueueRef_t *first = &q->refs[head_idx];
         ElasticQueueRef_t *last = &q->refs[last_idx];
 
-        size_t last_end = last->offset + last->len;
+        size_t first_offset = first->data - q->area_start;
+        size_t last_offset = last->data - q->area_start;
+        size_t last_end = last_offset + last->len;
 
-        if (last->offset >= first->offset) {
+        if (last_offset >= first_offset) {
             // Memory used by queue is contiguous, free space is at the end or beginning
             if (q->area_len - last_end >= n) {
                 // Fits exactly at the end
                 alloc_offset = last_end;
-            } else if (first->offset >= n) {
+            } else if (first_offset >= n) {
                 // Doesn't fit at end, but fits at the beginning (wrap around)
                 alloc_offset = 0;
             } else {
@@ -45,7 +55,7 @@ uint8_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
             }
         } else {
             // Used memory wraps around, free space is strictly in the middle
-            if (first->offset - last_end >= n) {
+            if (first_offset - last_end >= n) {
                 alloc_offset = last_end;
             } else {
                 return NULL; // Not enough space
@@ -55,24 +65,39 @@ uint8_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
 
     // Space found, register the reference
     ElasticQueueRef_t *new_ref = &q->refs[q->tail_ref];
-    new_ref->offset = alloc_offset;
+    new_ref->data = q->area_start + alloc_offset;
     new_ref->len = n;
+    new_ref->is_ready = false;
 
     q->tail_ref = (q->tail_ref + 1) % q->max_refs;
     q->num_refs++;
 
-    return q->area_start + alloc_offset;
+    return new_ref;
+}
+
+void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref)
+{
+    if (!q || !ref) return;
+    
+    ref->is_ready = true;
+    
+    // Trigger callback now that it's ready
+    if (q->ready_cb) {
+        q->ready_cb(q->ready_cb_user_data);
+    }
 }
 
 int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_buf, size_t *out_len)
 {
-    if (q->is_locked) return -1;       // Already locked by a previous call
-    if (q->num_refs == 0) return -1;   // Nothing to read
-    if (num_operations == 0) return -1;
+    if (q->is_locked) return ELASTIC_QUEUE_ERR_LOCKED;
+    if (q->num_refs == 0) return ELASTIC_QUEUE_ERR_EMPTY;
+    if (num_operations == 0) return ELASTIC_QUEUE_ERR_INVAL;
 
     ElasticQueueRef_t *first = &q->refs[q->head_ref];
 
-    if (out_buf) *out_buf = q->area_start + first->offset;
+    if (!first->is_ready) return ELASTIC_QUEUE_ERR_NOT_READY;
+
+    if (out_buf) *out_buf = first->data;
     if (out_len) *out_len = first->len;
 
     q->is_locked = true;
