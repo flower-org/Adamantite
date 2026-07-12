@@ -34,32 +34,33 @@
 
 // Define custom sizes based on traffic volume
 #define QUEUE_WAN_USB_SIZE 30720 // 30 KB for WAN and USB
+#define QUEUE_WAN_USB_MAX_REFS 100
 #define QUEUE_LAN_SIZE     15360 // 15 KB for LAN ports
-#define QUEUE_MAX_REFS     50
+#define QUEUE_LAN_MAX_REFS     50
 
 // WAN Queues (High Traffic)
 ElasticQueue_t wan_rx_queue;
 ElasticQueue_t wan_tx_queue;
 uint8_t wan_rx_area[QUEUE_WAN_USB_SIZE];
 uint8_t wan_tx_area[QUEUE_WAN_USB_SIZE];
-ElasticQueueRef_t wan_rx_refs[QUEUE_MAX_REFS];
-ElasticQueueRef_t wan_tx_refs[QUEUE_MAX_REFS];
+ElasticQueueRef_t wan_rx_refs[QUEUE_WAN_USB_MAX_REFS];
+ElasticQueueRef_t wan_tx_refs[QUEUE_WAN_USB_MAX_REFS];
 
 // USB Queues (High Traffic - Sniffer)
 ElasticQueue_t usb_rx_queue;
 ElasticQueue_t usb_tx_queue;
 uint8_t usb_rx_area[QUEUE_WAN_USB_SIZE];
 uint8_t usb_tx_area[QUEUE_WAN_USB_SIZE];
-ElasticQueueRef_t usb_rx_refs[QUEUE_MAX_REFS];
-ElasticQueueRef_t usb_tx_refs[QUEUE_MAX_REFS];
+ElasticQueueRef_t usb_rx_refs[QUEUE_WAN_USB_MAX_REFS];
+ElasticQueueRef_t usb_tx_refs[QUEUE_WAN_USB_MAX_REFS];
 
 // LAN Queues (4 Ports - Lower Traffic per port)
 ElasticQueue_t lan_rx_queues[4];
 ElasticQueue_t lan_tx_queues[4];
 uint8_t lan_rx_areas[4][QUEUE_LAN_SIZE];
 uint8_t lan_tx_areas[4][QUEUE_LAN_SIZE];
-ElasticQueueRef_t lan_rx_refs[4][QUEUE_MAX_REFS];
-ElasticQueueRef_t lan_tx_refs[4][QUEUE_MAX_REFS];
+ElasticQueueRef_t lan_rx_refs[4][QUEUE_LAN_MAX_REFS];
+ElasticQueueRef_t lan_tx_refs[4][QUEUE_LAN_MAX_REFS];
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -87,6 +88,23 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 /* USER CODE BEGIN PFP */
+#include "dma_mem_to_mem.h"
+
+// Wrapper contexts for each DMA stream
+DmaMemToMem_t dma_ctx_stream0;
+DmaMemToMem_t dma_ctx_stream1;
+DmaMemToMem_t dma_ctx_stream2;
+DmaMemToMem_t dma_ctx_stream3;
+DmaMemToMem_t dma_ctx_stream4;
+DmaMemToMem_t dma_ctx_stream5;
+
+// HAL DMA callbacks
+void HAL_DMA_XferCpltCallback_Stream0(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream0); }
+void HAL_DMA_XferCpltCallback_Stream1(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream1); }
+void HAL_DMA_XferCpltCallback_Stream2(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream2); }
+void HAL_DMA_XferCpltCallback_Stream3(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream3); }
+void HAL_DMA_XferCpltCallback_Stream4(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream4); }
+void HAL_DMA_XferCpltCallback_Stream5(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream5); }
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -144,16 +162,32 @@ int main(void)
   MX_ETH_Init();
   /* USER CODE BEGIN 2 */
   // Initialize all Elastic Queues
-  ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_MAX_REFS);
-  ElasticQueue_Init(&wan_tx_queue, wan_tx_area, QUEUE_WAN_USB_SIZE, wan_tx_refs, QUEUE_MAX_REFS);
+  ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
+  ElasticQueue_Init(&wan_tx_queue, wan_tx_area, QUEUE_WAN_USB_SIZE, wan_tx_refs, QUEUE_WAN_USB_MAX_REFS);
 
-  ElasticQueue_Init(&usb_rx_queue, usb_rx_area, QUEUE_WAN_USB_SIZE, usb_rx_refs, QUEUE_MAX_REFS);
-  ElasticQueue_Init(&usb_tx_queue, usb_tx_area, QUEUE_WAN_USB_SIZE, usb_tx_refs, QUEUE_MAX_REFS);
+  ElasticQueue_Init(&usb_rx_queue, usb_rx_area, QUEUE_WAN_USB_SIZE, usb_rx_refs, QUEUE_WAN_USB_MAX_REFS);
+  ElasticQueue_Init(&usb_tx_queue, usb_tx_area, QUEUE_WAN_USB_SIZE, usb_tx_refs, QUEUE_WAN_USB_MAX_REFS);
 
   for (int i = 0; i < 4; i++) {
-      ElasticQueue_Init(&lan_rx_queues[i], lan_rx_areas[i], QUEUE_LAN_SIZE, lan_rx_refs[i], QUEUE_MAX_REFS);
-      ElasticQueue_Init(&lan_tx_queues[i], lan_tx_areas[i], QUEUE_LAN_SIZE, lan_tx_refs[i], QUEUE_MAX_REFS);
+      ElasticQueue_Init(&lan_rx_queues[i], lan_rx_areas[i], QUEUE_LAN_SIZE, lan_rx_refs[i], QUEUE_LAN_MAX_REFS);
+      ElasticQueue_Init(&lan_tx_queues[i], lan_tx_areas[i], QUEUE_LAN_SIZE, lan_tx_refs[i], QUEUE_LAN_MAX_REFS);
   }
+
+  // Initialize DMA Wrappers
+  DmaMemToMem_Init(&dma_ctx_stream0, &hdma_memtomem_dma1_stream0);
+  DmaMemToMem_Init(&dma_ctx_stream1, &hdma_memtomem_dma1_stream1);
+  DmaMemToMem_Init(&dma_ctx_stream2, &hdma_memtomem_dma1_stream2);
+  DmaMemToMem_Init(&dma_ctx_stream3, &hdma_memtomem_dma1_stream3);
+  DmaMemToMem_Init(&dma_ctx_stream4, &hdma_memtomem_dma1_stream4);
+  DmaMemToMem_Init(&dma_ctx_stream5, &hdma_memtomem_dma1_stream5);
+
+  // Register HAL completion callbacks
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream0, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream0);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream1, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream1);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream2, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream2);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream3, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream3);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream4, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream4);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream5, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream5);
 
   // Start ETH in interrupt mode
   if (HAL_ETH_Start_IT(&heth) != HAL_OK)
