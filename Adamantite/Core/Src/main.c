@@ -18,20 +18,53 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include <stdio.h>
+#include "string.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "wan.h"
+#include "usb_fs.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#include "elastic_queue.h"
 
+// Define custom sizes based on traffic volume
+#define QUEUE_WAN_USB_SIZE 30720 // 30 KB for WAN and USB
+#define QUEUE_WAN_USB_MAX_REFS 100
+#define QUEUE_LAN_SIZE     15360 // 15 KB for LAN ports
+#define QUEUE_LAN_MAX_REFS     50
+
+// WAN Queues (High Traffic)
+ElasticQueue_t wan_rx_queue;
+ElasticQueue_t wan_tx_queue;
+uint8_t wan_rx_area[QUEUE_WAN_USB_SIZE];
+uint8_t wan_tx_area[QUEUE_WAN_USB_SIZE];
+ElasticQueueRef_t wan_rx_refs[QUEUE_WAN_USB_MAX_REFS];
+ElasticQueueRef_t wan_tx_refs[QUEUE_WAN_USB_MAX_REFS];
+
+// USB Queues (High Traffic - Sniffer)
+ElasticQueue_t usb_rx_queue;
+ElasticQueue_t usb_tx_queue;
+uint8_t usb_rx_area[QUEUE_WAN_USB_SIZE];
+uint8_t usb_tx_area[QUEUE_WAN_USB_SIZE];
+ElasticQueueRef_t usb_rx_refs[QUEUE_WAN_USB_MAX_REFS];
+ElasticQueueRef_t usb_tx_refs[QUEUE_WAN_USB_MAX_REFS];
+
+// LAN Queues (4 Ports - Lower Traffic per port)
+ElasticQueue_t lan_rx_queues[4];
+ElasticQueue_t lan_tx_queues[4];
+uint8_t lan_rx_areas[4][QUEUE_LAN_SIZE];
+uint8_t lan_tx_areas[4][QUEUE_LAN_SIZE];
+ElasticQueueRef_t lan_rx_refs[4][QUEUE_LAN_MAX_REFS];
+ElasticQueueRef_t lan_tx_refs[4][QUEUE_LAN_MAX_REFS];
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -40,21 +73,42 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
+DMA_HandleTypeDef hdma_memtomem_dma1_stream0;
+DMA_HandleTypeDef hdma_memtomem_dma1_stream1;
+DMA_HandleTypeDef hdma_memtomem_dma1_stream2;
+DMA_HandleTypeDef hdma_memtomem_dma1_stream3;
+DMA_HandleTypeDef hdma_memtomem_dma1_stream4;
+DMA_HandleTypeDef hdma_memtomem_dma1_stream5;
 /* USER CODE BEGIN PV */
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 /* USER CODE BEGIN PFP */
+#include "dma_mem_to_mem.h"
 
+// Wrapper contexts for each DMA stream
+DmaMemToMem_t dma_ctx_stream0;
+DmaMemToMem_t dma_ctx_stream1;
+DmaMemToMem_t dma_ctx_stream2;
+DmaMemToMem_t dma_ctx_stream3;
+DmaMemToMem_t dma_ctx_stream4;
+DmaMemToMem_t dma_ctx_stream5;
+
+// HAL DMA callbacks
+void HAL_DMA_XferCpltCallback_Stream0(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream0); }
+void HAL_DMA_XferCpltCallback_Stream1(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream1); }
+void HAL_DMA_XferCpltCallback_Stream2(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream2); }
+void HAL_DMA_XferCpltCallback_Stream3(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream3); }
+void HAL_DMA_XferCpltCallback_Stream4(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream4); }
+void HAL_DMA_XferCpltCallback_Stream5(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream5); }
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 /* USER CODE END 0 */
 void LED_Init(void)
 {
@@ -102,7 +156,44 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_USB_DEVICE_Init();
+  MX_ETH_Init();
   /* USER CODE BEGIN 2 */
+  // Initialize all Elastic Queues
+  ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
+  ElasticQueue_Init(&wan_tx_queue, wan_tx_area, QUEUE_WAN_USB_SIZE, wan_tx_refs, QUEUE_WAN_USB_MAX_REFS);
+
+  ElasticQueue_Init(&usb_rx_queue, usb_rx_area, QUEUE_WAN_USB_SIZE, usb_rx_refs, QUEUE_WAN_USB_MAX_REFS);
+  ElasticQueue_Init(&usb_tx_queue, usb_tx_area, QUEUE_WAN_USB_SIZE, usb_tx_refs, QUEUE_WAN_USB_MAX_REFS);
+
+  for (int i = 0; i < 4; i++) {
+      ElasticQueue_Init(&lan_rx_queues[i], lan_rx_areas[i], QUEUE_LAN_SIZE, lan_rx_refs[i], QUEUE_LAN_MAX_REFS);
+      ElasticQueue_Init(&lan_tx_queues[i], lan_tx_areas[i], QUEUE_LAN_SIZE, lan_tx_refs[i], QUEUE_LAN_MAX_REFS);
+  }
+
+  // Initialize DMA Wrappers
+  DmaMemToMem_Init(&dma_ctx_stream0, &hdma_memtomem_dma1_stream0, &wan_rx_queue);
+  DmaMemToMem_Init(&dma_ctx_stream1, &hdma_memtomem_dma1_stream1, &usb_rx_queue);
+  DmaMemToMem_Init(&dma_ctx_stream2, &hdma_memtomem_dma1_stream2, &lan_rx_queues[0]);
+  DmaMemToMem_Init(&dma_ctx_stream3, &hdma_memtomem_dma1_stream3, &lan_rx_queues[1]);
+  DmaMemToMem_Init(&dma_ctx_stream4, &hdma_memtomem_dma1_stream4, &lan_rx_queues[2]);
+  DmaMemToMem_Init(&dma_ctx_stream5, &hdma_memtomem_dma1_stream5, &lan_rx_queues[3]);
+
+  // Register HAL completion callbacks
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream0, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream0);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream1, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream1);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream2, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream2);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream3, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream3);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream4, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream4);
+  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream5, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream5);
+
+  // Start ETH in interrupt mode
+  if (HAL_ETH_Start_IT(&heth) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* USER CODE END 2 */
 
@@ -111,8 +202,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    HAL_GPIO_TogglePin(GPIOG, GPIO_PIN_7);
-	HAL_Delay (1000);
+    Demo_ProcessLanPackets();
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -140,9 +230,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
   RCC_OscInitStruct.HSICalibrationValue = 64;
+  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -166,6 +257,179 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * Enable DMA controller clock
+  * Configure DMA for memory to memory transfers
+  *   hdma_memtomem_dma1_stream0
+  *   hdma_memtomem_dma1_stream1
+  *   hdma_memtomem_dma1_stream2
+  *   hdma_memtomem_dma1_stream3
+  *   hdma_memtomem_dma1_stream4
+  *   hdma_memtomem_dma1_stream5
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* Configure DMA request hdma_memtomem_dma1_stream0 on DMA1_Stream0 */
+  hdma_memtomem_dma1_stream0.Instance = DMA1_Stream0;
+  hdma_memtomem_dma1_stream0.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream0.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream0.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream0.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream0.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream0.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream0.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream0.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream0.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream0.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream0.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream0.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream0) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* Configure DMA request hdma_memtomem_dma1_stream1 on DMA1_Stream1 */
+  hdma_memtomem_dma1_stream1.Instance = DMA1_Stream1;
+  hdma_memtomem_dma1_stream1.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream1.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream1.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream1.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream1.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream1.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream1.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream1.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream1.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream1.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream1.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream1.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream1) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* Configure DMA request hdma_memtomem_dma1_stream2 on DMA1_Stream2 */
+  hdma_memtomem_dma1_stream2.Instance = DMA1_Stream2;
+  hdma_memtomem_dma1_stream2.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream2.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream2.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream2.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream2.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream2.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream2.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream2.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream2.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream2.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream2.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream2.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream2) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* Configure DMA request hdma_memtomem_dma1_stream3 on DMA1_Stream3 */
+  hdma_memtomem_dma1_stream3.Instance = DMA1_Stream3;
+  hdma_memtomem_dma1_stream3.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream3.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream3.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream3.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream3.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream3.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream3.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream3.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream3.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream3.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream3.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream3.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream3) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* Configure DMA request hdma_memtomem_dma1_stream4 on DMA1_Stream4 */
+  hdma_memtomem_dma1_stream4.Instance = DMA1_Stream4;
+  hdma_memtomem_dma1_stream4.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream4.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream4.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream4.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream4.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream4.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream4.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream4.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream4.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream4.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream4.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream4.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream4) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* Configure DMA request hdma_memtomem_dma1_stream5 on DMA1_Stream5 */
+  hdma_memtomem_dma1_stream5.Instance = DMA1_Stream5;
+  hdma_memtomem_dma1_stream5.Init.Request = DMA_REQUEST_MEM2MEM;
+  hdma_memtomem_dma1_stream5.Init.Direction = DMA_MEMORY_TO_MEMORY;
+  hdma_memtomem_dma1_stream5.Init.PeriphInc = DMA_PINC_ENABLE;
+  hdma_memtomem_dma1_stream5.Init.MemInc = DMA_MINC_ENABLE;
+  hdma_memtomem_dma1_stream5.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream5.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+  hdma_memtomem_dma1_stream5.Init.Mode = DMA_NORMAL;
+  hdma_memtomem_dma1_stream5.Init.Priority = DMA_PRIORITY_LOW;
+  hdma_memtomem_dma1_stream5.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+  hdma_memtomem_dma1_stream5.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+  hdma_memtomem_dma1_stream5.Init.MemBurst = DMA_MBURST_SINGLE;
+  hdma_memtomem_dma1_stream5.Init.PeriphBurst = DMA_PBURST_SINGLE;
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_stream5) != HAL_OK)
+  {
+    Error_Handler( );
+  }
+
+  /* DMA interrupt init */
+  /* DMA1_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+  /* DMA1_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+  /* DMA1_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+
+}
+
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
