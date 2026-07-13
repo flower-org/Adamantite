@@ -37,13 +37,17 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
 {
     if (!dma_ctx || !dma_ctx->hdma || !src || !dest_qs
             || num_dests == 0 || num_dests > DMA_MAX_BROADCAST_DESTS || length == 0) {
-        // TODO: Abort
+        if (src_q) {
+            ElasticQueue_Abort(src_q);
+        }
         return DMA_BROADCAST_ERR_INVAL;
     }
     
     // Check if channel is already running
     if (dma_ctx->is_busy || dma_ctx->hdma->State != HAL_DMA_STATE_READY) {
-        // TODO: Abort
+        if (src_q) {
+            ElasticQueue_Abort(src_q);
+        }
         return DMA_BROADCAST_ERR_BUSY;
     }
     
@@ -71,17 +75,19 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
                 return DMA_BROADCAST_OK; // Successfully started
             }
             // If HAL_DMA_Start fails, we allocated space but failed to copy. It will be abandoned.
+            ElasticQueue_Abandon(dma_ctx->dest_queues[dma_ctx->current_dest_idx], ref);
             dma_ctx->current_allocated_ref = NULL;
         }
         
         // If allocation failed, or DMA failed to start, move to next queue
-        // TODO: Abandon
-        // TODO: Done (1 task failed to start)
+        if (dma_ctx->source_queue) {
+            ElasticQueue_Done(dma_ctx->source_queue);
+        }
         dma_ctx->current_dest_idx++;
     }
     
     // If we get here, no destinations could be started (queues full or DMA err)
-    // TODO: Abort
+    // The source queue was already fully consumed/aborted by the loop above via _Done.
     dma_ctx->is_busy = false;
     return DMA_BROADCAST_ERR_NO_QUEUES;
 }
@@ -110,16 +116,18 @@ void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx)
                                  dma_ctx->current_len) == HAL_OK) {
                 return; // Wait for the next transfer complete interrupt
             }
+            ElasticQueue_Abandon(dma_ctx->dest_queues[dma_ctx->current_dest_idx], ref);
             dma_ctx->current_allocated_ref = NULL;
         }
         // If allocation failed, packet is dropped for this destination, loop continues to the next one
-        // TODO: Abandon
-        // TODO: Done (1 task failed to start)
+        if (dma_ctx->source_queue) {
+            ElasticQueue_Done(dma_ctx->source_queue);
+        }
     }
     
     // 1. Auto-release the source queue lock if provided
     if (dma_ctx->source_queue != NULL) {
-        // Done: this task
+        // Done: this task (the successful transfer)
         ElasticQueue_Done(dma_ctx->source_queue);
     }
     
