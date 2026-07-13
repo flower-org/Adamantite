@@ -74,6 +74,12 @@ void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref);
 #define ELASTIC_QUEUE_ERR_INVAL     -4
 
 /**
+ * @brief Check if the queue currently has a ready buffer that can be locked.
+ * @return true if a buffer is ready and not already locked, false otherwise.
+ */
+bool ElasticQueue_IsLockable(ElasticQueue_t *q);
+
+/**
  * @brief Lock the next available buffer for reading.
  * @param num_operations Number of ElasticQueue_Done calls required to free.
  * @param out_buf Pointer to receive the buffer start.

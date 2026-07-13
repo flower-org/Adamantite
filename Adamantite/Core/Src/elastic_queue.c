@@ -105,6 +105,22 @@ void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref)
     }
 }
 
+bool ElasticQueue_IsLockable(ElasticQueue_t *q)
+{
+    if (!q || q->is_locked) return false;
+    
+    // We cannot reap dummy packets here because IsLockable shouldn't mutate state.
+    // However, if the head is a dummy packet, it means the *real* packet behind it
+    // is blocked from being locked. So if we see a dummy, or if the queue is empty,
+    // or if the head isn't ready, it's not lockable.
+    if (q->num_refs == 0) return false;
+    
+    ElasticQueueRef_t *first = &q->refs[q->head_ref];
+    if (!first->is_ready || first->len == 0) return false;
+    
+    return true;
+}
+
 int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_buf, size_t *out_len)
 {
     if (!q) return ELASTIC_QUEUE_ERR_INVAL;
