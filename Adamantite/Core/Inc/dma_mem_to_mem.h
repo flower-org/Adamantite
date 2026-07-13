@@ -9,8 +9,14 @@
 
 #define DMA_MAX_BROADCAST_DESTS 5
 
-/* Callback type for when a DMA transfer completes */
 typedef void (*DmaCopyCompleteCb_t)(void *user_data);
+
+/* Internal states for DmaMemToMem_t */
+typedef enum {
+    DMA_STATE_IDLE = 0,
+    DMA_STATE_RUNNING,
+    DMA_STATE_ERROR
+} DmaMemToMemState_t;
 
 /**
  * @brief Structure to track the state of a single DMA stream wrapper
@@ -19,8 +25,8 @@ typedef struct {
     DMA_HandleTypeDef * const hdma;
     ElasticQueue_t * const source_queue;
     
-    DmaCopyCompleteCb_t complete_cb;
-    void *user_data;
+    // Status of the last/current operation
+    DmaMemToMemState_t state;
     
     // Lazy broadcast tracking
     ElasticQueue_t *dest_queues[DMA_MAX_BROADCAST_DESTS];
@@ -44,21 +50,14 @@ void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, El
  * @brief Start a background memory-to-memory broadcast with lazy allocation.
  * 
  * @param dma_ctx      The DMA context to use
- * @param src          Source memory address
  * @param dest_qs      Array of destination queues to allocate from as needed
  * @param num_dests    Number of destinations (up to DMA_MAX_BROADCAST_DESTS)
- * @param length       Number of bytes to copy per destination
- * @param complete_cb  Function to call when ALL copies are finished
- * @param user_data    Arbitrary pointer to pass to the callback
- * @param src_q        (Optional) Source queue to call ElasticQueue_Done() on when complete
  * 
  * @return DMA_BROADCAST_OK on success, or a negative DMA_BROADCAST_ERR_* code on failure
  */
 int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx, 
                                ElasticQueue_t **dest_qs,
-                               uint8_t num_dests,
-                               DmaCopyCompleteCb_t complete_cb,
-                               void *user_data);
+                               uint8_t num_dests);
 
 /**
  * @brief Must be called from the HAL_DMA_RegisterCallback or inside the TC interrupt.

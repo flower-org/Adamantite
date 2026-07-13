@@ -24,8 +24,7 @@ void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, El
     DMA_HandleTypeDef **hdma_ptr = (DMA_HandleTypeDef **)&dma_ctx->hdma;
     *hdma_ptr = hdma;
 
-    dma_ctx->complete_cb = NULL;
-    dma_ctx->user_data = NULL;
+    dma_ctx->state = DMA_STATE_IDLE;
     
     dma_ctx->num_dests = 0;
     dma_ctx->current_dest_idx = 0;
@@ -33,31 +32,29 @@ void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, El
 
 int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx, 
                                ElasticQueue_t **dest_qs, 
-                               uint8_t num_dests,
-                               DmaCopyCompleteCb_t complete_cb,
-                               void *user_data)
+                               uint8_t num_dests)
 {
     if (!dma_ctx || !dma_ctx->hdma || !dest_qs
             || num_dests == 0 || num_dests > DMA_MAX_BROADCAST_DESTS) {
         if (dma_ctx && dma_ctx->source_queue) {
             ElasticQueue_Abort(dma_ctx->source_queue);
         }
+        if (dma_ctx) dma_ctx->state = DMA_STATE_ERROR;
         return DMA_BROADCAST_ERR_INVAL;
     }
     
     ElasticQueueRef_t *src_ref = ElasticQueue_PeekLocked(dma_ctx->source_queue);
     if (!src_ref || src_ref->len == 0) {
+        dma_ctx->state = DMA_STATE_ERROR;
         return DMA_BROADCAST_ERR_INVAL;
     }
     
     // Check if channel is already running via the HAL state
     if (dma_ctx->hdma->State != HAL_DMA_STATE_READY) {
         ElasticQueue_Abort(dma_ctx->source_queue);
+        dma_ctx->state = DMA_STATE_ERROR;
         return DMA_BROADCAST_ERR_BUSY;
     }
-    
-    dma_ctx->complete_cb = complete_cb;
-    dma_ctx->user_data = user_data;
     
     dma_ctx->num_dests = num_dests;
     dma_ctx->current_dest_idx = 0;
@@ -73,6 +70,7 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
         if (ref) {
             dma_ctx->current_allocated_ref = ref;
             if (HAL_DMA_Start_IT(dma_ctx->hdma, (uint32_t)src_ref->data, (uint32_t)ref->data, src_ref->len) == HAL_OK) {
+                dma_ctx->state = DMA_STATE_RUNNING;
                 return DMA_BROADCAST_OK; // Successfully started
             }
             // If HAL_DMA_Start fails, we allocated space but failed to copy. It will be abandoned.
@@ -87,6 +85,7 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
     
     // If we get here, no destinations could be started (queues full or DMA err)
     // The source queue was already fully consumed/aborted by the loop above via _Done.
+    dma_ctx->state = DMA_STATE_ERROR;
     return DMA_BROADCAST_ERR_NO_QUEUES;
 }
 
@@ -98,7 +97,8 @@ void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx)
     
     ElasticQueueRef_t *src_ref = ElasticQueue_PeekLocked(dma_ctx->source_queue);
     if (!src_ref) {
-        return; // Fatal error: queue was unlocked mid-transfer!
+        dma_ctx->state = DMA_STATE_ERROR; // Fatal: Ghost interrupt or unlocked mid-transfer
+        return;
     }
     
     // We successfully finished the current copy. Commit it to the queue.
@@ -128,8 +128,5 @@ void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx)
     // Done: this task (the successful transfer)
     ElasticQueue_Done(dma_ctx->source_queue);
     
-    // Fire user callback
-    if (dma_ctx->complete_cb != NULL) {
-        dma_ctx->complete_cb(dma_ctx->user_data);
-    }
+    dma_ctx->state = DMA_STATE_IDLE;
 }
