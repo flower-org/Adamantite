@@ -15,6 +15,7 @@ typedef void (*DmaCopyCompleteCb_t)(void *user_data);
 typedef enum {
     DMA_STATE_IDLE = 0,
     DMA_STATE_RUNNING,
+    DMA_STATE_TRANSFER_DONE, // IRQ fired, waiting for main loop to cascade
     DMA_STATE_ERROR
 } DmaMemToMemState_t;
 
@@ -64,8 +65,14 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
 
 /**
  * @brief Must be called from the HAL_DMA_RegisterCallback or inside the TC interrupt.
- *        This clears the busy flag, cascades broadcasts, and fires the user callback.
+ *        This ONLY sets a flag to keep the IRQ handler as minimal as possible.
  */
 void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx);
+
+/**
+ * @brief Polled in the main application loop. Checks the status flag set by the IRQ, 
+ *        commits the finished buffer, and cascades to the next destination if applicable.
+ */
+void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx);
 
 #endif /* DMA_MEM_TO_MEM_H */

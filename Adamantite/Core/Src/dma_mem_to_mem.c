@@ -91,7 +91,14 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
 
 void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx)
 {
-    if (!dma_ctx) {
+    if (dma_ctx && dma_ctx->state == DMA_STATE_RUNNING) {
+        dma_ctx->state = DMA_STATE_TRANSFER_DONE;
+    }
+}
+
+void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx)
+{
+    if (!dma_ctx || dma_ctx->state != DMA_STATE_TRANSFER_DONE) {
         return;
     }
     
@@ -116,6 +123,7 @@ void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx)
                                  (uint32_t)src_ref->data, 
                                  (uint32_t)ref->data, 
                                  src_ref->len) == HAL_OK) {
+                dma_ctx->state = DMA_STATE_RUNNING;
                 return; // Wait for the next transfer complete interrupt
             }
             ElasticQueue_Abandon(dma_ctx->dest_queues[dma_ctx->current_dest_idx], ref);
