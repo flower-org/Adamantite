@@ -19,7 +19,6 @@ typedef struct {
     DMA_HandleTypeDef * const hdma;
     ElasticQueue_t * const source_queue;
     
-    bool is_busy;
     DmaCopyCompleteCb_t complete_cb;
     void *user_data;
     
