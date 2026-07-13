@@ -35,6 +35,8 @@
 // Define custom sizes based on traffic volume
 #define QUEUE_WAN_USB_SIZE 30720 // 30 KB for WAN and USB
 #define QUEUE_WAN_USB_MAX_REFS 100
+#define LAN_COUNT     	   4
+#define INTERFACE_COUNT    6
 #define QUEUE_LAN_SIZE     15360 // 15 KB for LAN ports
 #define QUEUE_LAN_MAX_REFS     50
 
@@ -55,12 +57,12 @@ ElasticQueueRef_t usb_rx_refs[QUEUE_WAN_USB_MAX_REFS];
 ElasticQueueRef_t usb_tx_refs[QUEUE_WAN_USB_MAX_REFS];
 
 // LAN Queues (4 Ports - Lower Traffic per port)
-ElasticQueue_t lan_rx_queues[4];
-ElasticQueue_t lan_tx_queues[4];
-uint8_t lan_rx_areas[4][QUEUE_LAN_SIZE];
-uint8_t lan_tx_areas[4][QUEUE_LAN_SIZE];
-ElasticQueueRef_t lan_rx_refs[4][QUEUE_LAN_MAX_REFS];
-ElasticQueueRef_t lan_tx_refs[4][QUEUE_LAN_MAX_REFS];
+ElasticQueue_t lan_rx_queues[LAN_COUNT];
+ElasticQueue_t lan_tx_queues[LAN_COUNT];
+uint8_t lan_rx_areas[LAN_COUNT][QUEUE_LAN_SIZE];
+uint8_t lan_tx_areas[LAN_COUNT][QUEUE_LAN_SIZE];
+ElasticQueueRef_t lan_rx_refs[LAN_COUNT][QUEUE_LAN_MAX_REFS];
+ElasticQueueRef_t lan_tx_refs[LAN_COUNT][QUEUE_LAN_MAX_REFS];
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -98,6 +100,15 @@ DmaMemToMem_t dma_ctx_stream3;
 DmaMemToMem_t dma_ctx_stream4;
 DmaMemToMem_t dma_ctx_stream5;
 
+DmaMemToMem_t* const all_dma_streams[INTERFACE_COUNT] = {
+    &dma_ctx_stream0,
+    &dma_ctx_stream1,
+    &dma_ctx_stream2,
+    &dma_ctx_stream3,
+    &dma_ctx_stream4,
+    &dma_ctx_stream5
+};
+
 // HAL DMA callbacks
 void HAL_DMA_XferCpltCallback_Stream0(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream0); }
 void HAL_DMA_XferCpltCallback_Stream1(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream1); }
@@ -123,17 +134,65 @@ void LED_Init(void)
 
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 }
+
+void main_loop(void) {
+	/* Infinite loop */
+	while (1)
+	{
+		// TODO: remove this
+		Demo_ProcessLanPackets();
+
+		// 1) DMA RX-to-TX start. Trigger: can lock RX queue.
+		if (ElasticQueue_IsLockable(&wan_rx_queue)) {
+			// TODO: implement
+		}
+		if (ElasticQueue_IsLockable(&usb_rx_queue)) {
+			// TODO: implement
+		}
+		for (int i = 0; i < LAN_COUNT; i++) {
+			if (ElasticQueue_IsLockable(&lan_rx_queues[i])) {
+				// TODO: implement
+			}
+		}
+
+		// ----------------------------------------------------------
+
+		// 2) DMA RX-to-TX continue. Trigger: DmaMemToMem_t in state DMA_STATE_TRANSFER_DONE.
+		// TODO: implement
+		for (int i = 0; i < INTERFACE_COUNT; i++) {
+			if (all_dma_streams[i]->state == DMA_STATE_TRANSFER_DONE) {
+				// TODO: implement
+			}
+		}
+
+		// ----------------------------------------------------------
+
+		// 3) HW to RX. Trigger: flag set by HW IRQ, implementation may vary for HW.
+		// TODO: implement
+
+		// ----------------------------------------------------------
+
+		// 4) TX to HW. Trigger: can lock TX queue, implementation may vary for HW.
+		if (ElasticQueue_IsLockable(&wan_tx_queue)) {
+			// TODO: implement
+		}
+		if (ElasticQueue_IsLockable(&usb_tx_queue)) {
+			// TODO: implement
+		}
+		for (int i = 0; i < LAN_COUNT; i++) {
+			if (ElasticQueue_IsLockable(&lan_tx_queues[i])) {
+				// TODO: implement
+			}
+		}
+	}
+}
+
 /**
   * @brief  The application entry point.
   * @retval int
   */
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
   /* MPU Configuration--------------------------------------------------------*/
   MPU_Config();
 
@@ -142,24 +201,17 @@ int main(void)
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
   /* Configure the system clock */
   SystemClock_Config();
 
   LED_Init();             // initialize PG7 LED
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_USB_DEVICE_Init();
   MX_ETH_Init();
+
   /* USER CODE BEGIN 2 */
   // Initialize all Elastic Queues
   ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
@@ -194,17 +246,10 @@ int main(void)
   {
     Error_Handler();
   }
-
   /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-    Demo_ProcessLanPackets();
-    /* USER CODE BEGIN 3 */
-  }
+  /* USER CODE MAIN LOOP */
+  main_loop();
   /* USER CODE END 3 */
 }
 
