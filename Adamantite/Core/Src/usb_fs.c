@@ -50,7 +50,7 @@ void USB_FS_TxComplete(void)
   USB_FS_SendNext();
 }
 
-static void USB_FS_EnqueueMessage(const uint8_t *msg, uint16_t len)
+void USB_FS_EnqueueMessage(const uint8_t *msg, uint16_t len)
 {
   if (USB_CDC_IsConfigured() == 0U) { return; }
   if (len == 0U) { return; }

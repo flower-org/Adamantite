@@ -10,5 +10,6 @@ void Demo_ReportPacket(uint8_t *frame, uint32_t frame_len, size_t active_queue_c
 
 void USB_FS_TxComplete(void);
 void USB_FS_RxData(const uint8_t *Buf, uint32_t Len);
+void USB_FS_EnqueueMessage(const uint8_t *msg, uint16_t len);
 
 #endif /* __USB_FS_H */
