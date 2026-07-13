@@ -24,9 +24,6 @@ typedef struct {
     void *user_data;
     
     // Lazy broadcast tracking
-    const uint8_t *current_src;
-    size_t current_len;
-    
     ElasticQueue_t *dest_queues[DMA_MAX_BROADCAST_DESTS];
     ElasticQueueRef_t *current_allocated_ref;
     uint8_t num_dests;
@@ -59,10 +56,8 @@ void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, El
  * @return DMA_BROADCAST_OK on success, or a negative DMA_BROADCAST_ERR_* code on failure
  */
 int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx, 
-                               const uint8_t *src, 
                                ElasticQueue_t **dest_qs,
                                uint8_t num_dests,
-                               size_t length,
                                DmaCopyCompleteCb_t complete_cb,
                                void *user_data);
 
