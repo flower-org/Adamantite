@@ -12,15 +12,21 @@ static void HAL_DMA_CopyComplete(DMA_HandleTypeDef *hdma)
     // For now, if we reach here, the transfer is complete.
 }
 
-void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef *hdma, ElasticQueue_t *src_q)
+void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, ElasticQueue_t * const src_q)
 {
     if (!dma_ctx || !hdma || !src_q) { return; }
     
-    dma_ctx->hdma = hdma;
+    // We cast away the const just for initialization. 
+    // This enforces the "constant after init" contract for the rest of the application.
+    ElasticQueue_t **sq_ptr = (ElasticQueue_t **)&dma_ctx->source_queue;
+    *sq_ptr = src_q;
+
+    DMA_HandleTypeDef **hdma_ptr = (DMA_HandleTypeDef **)&dma_ctx->hdma;
+    *hdma_ptr = hdma;
+
     dma_ctx->is_busy = false;
     dma_ctx->complete_cb = NULL;
     dma_ctx->user_data = NULL;
-    dma_ctx->source_queue = src_q;
     
     dma_ctx->num_dests = 0;
     dma_ctx->current_dest_idx = 0;

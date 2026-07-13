@@ -16,13 +16,12 @@ typedef void (*DmaCopyCompleteCb_t)(void *user_data);
  * @brief Structure to track the state of a single DMA stream wrapper
  */
 typedef struct {
-    DMA_HandleTypeDef *hdma;
+    DMA_HandleTypeDef * const hdma;
+    ElasticQueue_t * const source_queue;
+    
     bool is_busy;
     DmaCopyCompleteCb_t complete_cb;
     void *user_data;
-    
-    // Constant Pointer to the source queue so we can auto-unlock/done it
-    ElasticQueue_t * const source_queue;
     
     // Lazy broadcast tracking
     const uint8_t *current_src;
@@ -43,7 +42,7 @@ typedef struct {
 /**
  * @brief Initialize a DMA wrapper structure with its hardware handle
  */
-void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef *hdma, ElasticQueue_t *src_q);
+void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef * const hdma, ElasticQueue_t * const src_q);
 
 /**
  * @brief Start a background memory-to-memory broadcast with lazy allocation.

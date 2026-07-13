@@ -174,12 +174,12 @@ int main(void)
   }
 
   // Initialize DMA Wrappers
-  DmaMemToMem_Init(&dma_ctx_stream0, &hdma_memtomem_dma1_stream0);
-  DmaMemToMem_Init(&dma_ctx_stream1, &hdma_memtomem_dma1_stream1);
-  DmaMemToMem_Init(&dma_ctx_stream2, &hdma_memtomem_dma1_stream2);
-  DmaMemToMem_Init(&dma_ctx_stream3, &hdma_memtomem_dma1_stream3);
-  DmaMemToMem_Init(&dma_ctx_stream4, &hdma_memtomem_dma1_stream4);
-  DmaMemToMem_Init(&dma_ctx_stream5, &hdma_memtomem_dma1_stream5);
+  DmaMemToMem_Init(&dma_ctx_stream0, &hdma_memtomem_dma1_stream0, &wan_rx_queue);
+  DmaMemToMem_Init(&dma_ctx_stream1, &hdma_memtomem_dma1_stream1, &usb_rx_queue);
+  DmaMemToMem_Init(&dma_ctx_stream2, &hdma_memtomem_dma1_stream2, &lan_rx_queues[0]);
+  DmaMemToMem_Init(&dma_ctx_stream3, &hdma_memtomem_dma1_stream3, &lan_rx_queues[1]);
+  DmaMemToMem_Init(&dma_ctx_stream4, &hdma_memtomem_dma1_stream4, &lan_rx_queues[2]);
+  DmaMemToMem_Init(&dma_ctx_stream5, &hdma_memtomem_dma1_stream5, &lan_rx_queues[3]);
 
   // Register HAL completion callbacks
   HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream0, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream0);
