@@ -21,17 +21,17 @@ typedef struct {
     DmaCopyCompleteCb_t complete_cb;
     void *user_data;
     
-    // Pointer to the source queue so we can auto-unlock/done it
-    ElasticQueue_t *source_queue;
+    // Constant Pointer to the source queue so we can auto-unlock/done it
+    ElasticQueue_t * const source_queue;
     
     // Lazy broadcast tracking
     const uint8_t *current_src;
     size_t current_len;
     
-        ElasticQueue_t *dest_queues[DMA_MAX_BROADCAST_DESTS];
-        ElasticQueueRef_t *current_allocated_ref;
-        uint8_t num_dests;
-        uint8_t current_dest_idx;
+    ElasticQueue_t *dest_queues[DMA_MAX_BROADCAST_DESTS];
+    ElasticQueueRef_t *current_allocated_ref;
+    uint8_t num_dests;
+    uint8_t current_dest_idx;
 } DmaMemToMem_t;
 
 /* Error codes for DMA operations */
@@ -43,7 +43,7 @@ typedef struct {
 /**
  * @brief Initialize a DMA wrapper structure with its hardware handle
  */
-void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef *hdma);
+void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef *hdma, ElasticQueue_t *src_q);
 
 /**
  * @brief Start a background memory-to-memory broadcast with lazy allocation.
@@ -65,8 +65,7 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
                                uint8_t num_dests,
                                size_t length,
                                DmaCopyCompleteCb_t complete_cb,
-                               void *user_data,
-                               ElasticQueue_t *src_q);
+                               void *user_data);
 
 /**
  * @brief Must be called from the HAL_DMA_RegisterCallback or inside the TC interrupt.
