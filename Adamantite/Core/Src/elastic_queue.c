@@ -11,14 +11,6 @@ void ElasticQueue_Init(ElasticQueue_t *q, uint8_t *area_start, size_t area_len, 
     q->num_refs = 0;
     q->is_locked = false;
     q->remaining_ops = 0;
-    q->ready_cb = NULL;
-    q->ready_cb_user_data = NULL;
-}
-
-void ElasticQueue_SetReadyCallback(ElasticQueue_t *q, ElasticQueueReadyCb_t cb, void *user_data)
-{
-    q->ready_cb = cb;
-    q->ready_cb_user_data = user_data;
 }
 
 ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
@@ -78,13 +70,8 @@ ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n)
 void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref)
 {
     if (!q || !ref) return;
-    
+
     ref->is_ready = true;
-    
-    // Trigger callback now that it's ready
-    if (q->ready_cb) {
-        q->ready_cb(q->ready_cb_user_data);
-    }
 }
 
 void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref)
@@ -103,6 +90,24 @@ void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref)
         ref->len = 0;
         ref->is_ready = true;
     }
+}
+
+ElasticQueueRef_t* ElasticQueue_GetRefByBuffer(ElasticQueue_t *q, const uint8_t *buffer)
+{
+    // TODO: this can be made O(1), use hashtable for lookups
+
+    if (!q || !buffer || q->num_refs == 0) return NULL;
+    
+    // Only search currently active allocations (between head and tail)
+    for (size_t i = 0; i < q->num_refs; i++) {
+        size_t idx = (q->head_ref + i) % q->max_refs;
+        // Ignore 0-length dummy packets (abandoned but trapped allocations)
+        if (q->refs[idx].len > 0 && q->refs[idx].data == buffer) {
+            return &q->refs[idx];
+        }
+    }
+    
+    return NULL;
 }
 
 bool ElasticQueue_IsLockable(ElasticQueue_t *q)
@@ -150,7 +155,7 @@ int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_
     q->is_locked = true;
     q->remaining_ops = num_operations;
 
-    return 0;
+    return ELASTIC_QUEUE_OK;
 }
 
 ElasticQueueRef_t* ElasticQueue_PeekLocked(ElasticQueue_t *q)

@@ -30,21 +30,12 @@ typedef struct {
     // Multi-phase locking state
     bool is_locked;
     uint32_t remaining_ops;
-
-    // Notification callback for when a buffer becomes ready
-    ElasticQueueReadyCb_t ready_cb;
-    void *ready_cb_user_data;
 } ElasticQueue_t;
 
 /**
  * @brief Initialize the elastic queue
  */
 void ElasticQueue_Init(ElasticQueue_t *q, uint8_t *area_start, size_t area_len, ElasticQueueRef_t *refs, size_t max_refs);
-
-/**
- * @brief Set the callback to be fired when a buffer becomes ready.
- */
-void ElasticQueue_SetReadyCallback(ElasticQueue_t *q, ElasticQueueReadyCb_t cb, void *user_data);
 
 /**
  * @brief Allocate a continuous buffer of size n. 
@@ -65,6 +56,13 @@ void ElasticQueue_Commit(ElasticQueue_t *q, ElasticQueueRef_t *ref);
  *        Reclaims memory if possible, or safely marks it to be skipped.
  */
 void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref);
+
+/**
+ * @brief Find the queue reference associated with a specific buffer address.
+ * @param buffer Pointer to the data buffer.
+ * @return Pointer to the reference, or NULL if not found.
+ */
+ElasticQueueRef_t* ElasticQueue_GetRefByBuffer(ElasticQueue_t *q, const uint8_t *buffer);
 
 /* Error codes for ElasticQueue operations */
 #define ELASTIC_QUEUE_OK             0
