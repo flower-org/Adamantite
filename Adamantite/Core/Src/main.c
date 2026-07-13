@@ -31,6 +31,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 #include "elastic_queue.h"
+#include "dma_mem_to_mem.h"
 
 // Define custom sizes based on traffic volume
 #define QUEUE_WAN_USB_SIZE 30720 // 30 KB for WAN and USB
@@ -93,29 +94,29 @@ static void MX_DMA_Init(void);
 #include "dma_mem_to_mem.h"
 
 // Wrapper contexts for each DMA stream
-DmaMemToMem_t dma_ctx_stream0;
-DmaMemToMem_t dma_ctx_stream1;
-DmaMemToMem_t dma_ctx_stream2;
-DmaMemToMem_t dma_ctx_stream3;
-DmaMemToMem_t dma_ctx_stream4;
-DmaMemToMem_t dma_ctx_stream5;
+DmaMemToMem_t wan_rx_dma_ctx_stream;
+DmaMemToMem_t usb_rx_dma_ctx_stream;
+DmaMemToMem_t lan1_rx_dma_ctx_stream;
+DmaMemToMem_t lan2_rx_dma_ctx_stream;
+DmaMemToMem_t lan3_rx_dma_ctx_stream;
+DmaMemToMem_t lan4_rx_dma_ctx_stream;
 
 DmaMemToMem_t* const all_dma_streams[INTERFACE_COUNT] = {
-    &dma_ctx_stream0,
-    &dma_ctx_stream1,
-    &dma_ctx_stream2,
-    &dma_ctx_stream3,
-    &dma_ctx_stream4,
-    &dma_ctx_stream5
+    &wan_rx_dma_ctx_stream,
+    &usb_rx_dma_ctx_stream,
+    &lan1_rx_dma_ctx_stream,
+    &lan2_rx_dma_ctx_stream,
+    &lan3_rx_dma_ctx_stream,
+    &lan4_rx_dma_ctx_stream
 };
 
 // HAL DMA callbacks
-void HAL_DMA_XferCpltCallback_Stream0(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream0); }
-void HAL_DMA_XferCpltCallback_Stream1(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream1); }
-void HAL_DMA_XferCpltCallback_Stream2(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream2); }
-void HAL_DMA_XferCpltCallback_Stream3(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream3); }
-void HAL_DMA_XferCpltCallback_Stream4(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream4); }
-void HAL_DMA_XferCpltCallback_Stream5(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&dma_ctx_stream5); }
+void HAL_DMA_XferCpltCallback_Stream0(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&wan_rx_dma_ctx_stream); }
+void HAL_DMA_XferCpltCallback_Stream1(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&usb_rx_dma_ctx_stream); }
+void HAL_DMA_XferCpltCallback_Stream2(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&lan1_rx_dma_ctx_stream); }
+void HAL_DMA_XferCpltCallback_Stream3(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&lan2_rx_dma_ctx_stream); }
+void HAL_DMA_XferCpltCallback_Stream4(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&lan3_rx_dma_ctx_stream); }
+void HAL_DMA_XferCpltCallback_Stream5(DMA_HandleTypeDef *hdma) { DmaMemToMem_TransferComplete(&lan4_rx_dma_ctx_stream); }
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -141,18 +142,16 @@ void main_loop(void) {
 	{
 		// 1) DMA RX-to-TX start. Trigger: can lock RX queue.
 		if (ElasticQueue_IsLockable(&wan_rx_queue)) {
-			// TODO: implement
-
-            // We pass it to the reporter as if it was ETH_BufferTypeDef
-            // because their data/len fields align exactly in memory.
-            uint8_t *out_buf;
-            size_t out_len;
-            if (ElasticQueue_Lock(&wan_rx_queue, 1, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
-
-            	Demo_ReportPacket(out_buf, out_len, wan_rx_queue.num_refs);
-
-                ElasticQueue_Done(&wan_rx_queue);
-            }
+		    if (DmaMemToMem_IsReady(&wan_rx_dma_ctx_stream)) {
+	            // We pass it to the reporter as if it was ETH_BufferTypeDef
+	            // because their data/len fields align exactly in memory.
+	            uint8_t *out_buf;
+	            size_t out_len;
+	            if (ElasticQueue_Lock(&wan_rx_queue, 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
+	                ElasticQueue_t *dests[] = { &usb_tx_queue, &wan_tx_queue };
+	                DmaMemToMem_StartBroadcast(&wan_rx_dma_ctx_stream, dests, 2);
+	            }
+		    }
 		}
 		if (ElasticQueue_IsLockable(&usb_rx_queue)) {
 			// TODO: implement
@@ -166,10 +165,10 @@ void main_loop(void) {
 		// ----------------------------------------------------------
 
 		// 2) DMA RX-to-TX continue. Trigger: DmaMemToMem_t in state DMA_STATE_TRANSFER_DONE.
-		// TODO: implement
 		for (int i = 0; i < INTERFACE_COUNT; i++) {
 			if (all_dma_streams[i]->state == DMA_STATE_TRANSFER_DONE) {
-				// TODO: implement
+    			// TODO: maybe this should be called straight from the interrupt to avoid delays?
+				DmaMemToMem_Process(all_dma_streams[i]);
 			}
 		}
 
@@ -185,9 +184,21 @@ void main_loop(void) {
 		// 4) TX to HW. Trigger: can lock TX queue, implementation may vary for HW.
 		if (ElasticQueue_IsLockable(&wan_tx_queue)) {
 			// TODO: implement
+            uint8_t *out_buf;
+            size_t out_len;
+            if (ElasticQueue_Lock(&wan_tx_queue, 1, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
+                // Drops packet
+                ElasticQueue_Abort(&wan_tx_queue);
+            }
 		}
 		if (ElasticQueue_IsLockable(&usb_tx_queue)) {
-			// TODO: implement
+            uint8_t *out_buf;
+            size_t out_len;
+            if (ElasticQueue_Lock(&usb_tx_queue, 1, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
+                // TODO: DMA to USB
+            	Demo_ReportPacket(out_buf, out_len, wan_rx_queue.num_refs);
+                ElasticQueue_Done(&usb_tx_queue);
+            }
 		}
 		for (int i = 0; i < LAN_COUNT; i++) {
 			if (ElasticQueue_IsLockable(&lan_tx_queues[i])) {
@@ -236,12 +247,12 @@ int main(void)
   }
 
   // Initialize DMA Wrappers
-  DmaMemToMem_Init(&dma_ctx_stream0, &hdma_memtomem_dma1_stream0, &wan_rx_queue);
-  DmaMemToMem_Init(&dma_ctx_stream1, &hdma_memtomem_dma1_stream1, &usb_rx_queue);
-  DmaMemToMem_Init(&dma_ctx_stream2, &hdma_memtomem_dma1_stream2, &lan_rx_queues[0]);
-  DmaMemToMem_Init(&dma_ctx_stream3, &hdma_memtomem_dma1_stream3, &lan_rx_queues[1]);
-  DmaMemToMem_Init(&dma_ctx_stream4, &hdma_memtomem_dma1_stream4, &lan_rx_queues[2]);
-  DmaMemToMem_Init(&dma_ctx_stream5, &hdma_memtomem_dma1_stream5, &lan_rx_queues[3]);
+  DmaMemToMem_Init(&wan_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream0, &wan_rx_queue);
+  DmaMemToMem_Init(&usb_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream1, &usb_rx_queue);
+  DmaMemToMem_Init(&lan1_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream2, &lan_rx_queues[0]);
+  DmaMemToMem_Init(&lan2_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream3, &lan_rx_queues[1]);
+  DmaMemToMem_Init(&lan3_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream4, &lan_rx_queues[2]);
+  DmaMemToMem_Init(&lan4_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream5, &lan_rx_queues[3]);
 
   // Register HAL completion callbacks
   HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_stream0, HAL_DMA_XFER_CPLT_CB_ID, HAL_DMA_XferCpltCallback_Stream0);

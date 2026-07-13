@@ -112,6 +112,9 @@ void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx)
     if (dma_ctx->current_allocated_ref) {
         ElasticQueue_Commit(dma_ctx->dest_queues[dma_ctx->current_dest_idx], dma_ctx->current_allocated_ref);
         dma_ctx->current_allocated_ref = NULL;
+
+        // Done: this task (the successful transfer)
+        ElasticQueue_Done(dma_ctx->source_queue);
     }
     
     // Attempt to start the next valid destination
@@ -133,8 +136,12 @@ void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx)
         ElasticQueue_Done(dma_ctx->source_queue);
     }
     
-    // Done: this task (the successful transfer)
-    ElasticQueue_Done(dma_ctx->source_queue);
-    
     dma_ctx->state = DMA_STATE_IDLE;
 }
+
+bool DmaMemToMem_IsReady(DmaMemToMem_t *dma_ctx)
+{
+    if (!dma_ctx) return false;
+    return (dma_ctx->state != DMA_STATE_RUNNING && dma_ctx->state != DMA_STATE_TRANSFER_DONE);
+}
+

@@ -75,4 +75,9 @@ void DmaMemToMem_TransferComplete(DmaMemToMem_t *dma_ctx);
  */
 void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx);
 
+/**
+ * @brief Checks if the DMA context is idle and ready for a new transfer.
+ */
+bool DmaMemToMem_IsReady(DmaMemToMem_t *dma_ctx);
+
 #endif /* DMA_MEM_TO_MEM_H */
