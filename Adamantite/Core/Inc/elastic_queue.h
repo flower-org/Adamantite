@@ -83,6 +83,18 @@ void ElasticQueue_Abandon(ElasticQueue_t *q, ElasticQueueRef_t *ref);
 int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_buf, size_t *out_len);
 
 /**
+ * @brief Peek at the currently locked buffer.
+ * @return Pointer to the locked reference, or NULL if not locked.
+ */
+ElasticQueueRef_t* ElasticQueue_PeekLocked(ElasticQueue_t *q);
+
+/**
+ * @brief Peek at the next available buffer without locking it.
+ * @return Pointer to the next reference if ready, or NULL if empty/not ready.
+ */
+ElasticQueueRef_t* ElasticQueue_Peek(ElasticQueue_t *q);
+
+/**
  * @brief Mark one operation as done. When operations reach 0, the buffer is freed.
  */
 void ElasticQueue_Done(ElasticQueue_t *q);

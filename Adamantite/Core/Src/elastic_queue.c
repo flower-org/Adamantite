@@ -137,6 +137,42 @@ int ElasticQueue_Lock(ElasticQueue_t *q, uint32_t num_operations, uint8_t **out_
     return 0;
 }
 
+ElasticQueueRef_t* ElasticQueue_PeekLocked(ElasticQueue_t *q)
+{
+    if (!q || !q->is_locked) return NULL;
+    return &q->refs[q->head_ref];
+}
+
+ElasticQueueRef_t* ElasticQueue_Peek(ElasticQueue_t *q)
+{
+    if (!q) return NULL;
+
+    // Auto-reap any abandoned packets (from ElasticQueue_Abandon)
+    while (q->num_refs > 0) {
+        ElasticQueueRef_t *first = &q->refs[q->head_ref];
+        if (first->is_ready && first->len == 0) {
+            // Cannot modify head_ref here if the queue is locked by someone else!
+            // But since Peek() implies we want to see the next available, and a dummy packet
+            // is technically "ready", we can skip over it safely if it's NOT locked.
+            if (q->is_locked) {
+                break; // Give up, a lock is holding the dummy in place
+            }
+            q->head_ref = (q->head_ref + 1) % q->max_refs;
+            q->num_refs--;
+        } else {
+            break;
+        }
+    }
+
+    if (q->num_refs == 0) return NULL;
+
+    ElasticQueueRef_t *first = &q->refs[q->head_ref];
+
+    if (!first->is_ready) return NULL;
+
+    return first;
+}
+
 void ElasticQueue_Done(ElasticQueue_t *q)
 {
     if (!q || !q->is_locked) return;
