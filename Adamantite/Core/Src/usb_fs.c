@@ -105,27 +105,26 @@ void Demo_ReportPacketCount(void)
   }
 }
 
-void Demo_ReportPacket(const ETH_BufferTypeDef *rx_packet)
+extern uint64_t demo_allocate_attempts;
+extern uint64_t demo_allocated;
+
+void Demo_ReportPacket(uint8_t *frame, uint32_t frame_len, size_t active_queue_count)
 {
   char msg[DEMO_USB_MESSAGE_MAX_LEN];
-  const uint8_t *frame;
-  uint32_t frame_len;
   uint16_t ether_type;
   const char *type_name;
   
-  if ((rx_packet == NULL) || (rx_packet->buffer == NULL)) { return; }
-  frame = rx_packet->buffer;
-  frame_len = rx_packet->len;
   if (frame_len < 14U) { return; }
   
   ether_type = ((uint16_t)frame[12] << 8) | frame[13];
   type_name = Demo_EtherTypeName(ether_type);
   
   int message_len = snprintf(msg, sizeof(msg),
-                         "len=%lu type=0x%04x(%s) dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x\r\n",
+                         "len=%lu type=0x%04x(%s) dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x alloc=%lu/%lu q=%lu\r\n",
                          (unsigned long)frame_len, ether_type, type_name,
                          frame[0], frame[1], frame[2], frame[3], frame[4], frame[5],
-                         frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
+                         frame[6], frame[7], frame[8], frame[9], frame[10], frame[11],
+                         (unsigned long)demo_allocated, (unsigned long)demo_allocate_attempts, (unsigned long)active_queue_count);
   if (message_len > 0) {
     USB_FS_EnqueueMessage((uint8_t *)msg, (uint16_t)message_len);
   }

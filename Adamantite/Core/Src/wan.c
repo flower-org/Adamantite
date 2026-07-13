@@ -2,6 +2,9 @@
 #include "usb_fs.h"
 #include "main.h"
 #include <string.h>
+#include "elastic_queue.h"
+
+extern ElasticQueue_t wan_rx_queue;
 
 #if defined ( __ICCARM__ ) /*!< IAR Compiler */
 #pragma location=0x30000000
@@ -23,46 +26,53 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDesc
 ETH_TxPacketConfig TxConfig;
 ETH_HandleTypeDef heth;
 
-static uint8_t EthRxBuffer[ETH_RX_DESC_CNT][ETH_RX_BUFFER_SIZE];
-static ETH_BufferTypeDef EthRxBufferNodes[ETH_RX_DESC_CNT];
 static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
 static const uint8_t demo_tx_payload[] = {'a', 'd', 'a', 'm', 'a', 'n', 't', 'i', 't', 'e', '-', 'd', 'e', 'm', 'o'};
 static uint8_t demo_tx_sent = 0U;
 
 uint64_t demo_packet_count = 0U;
-volatile uint32_t packet_leases = 0;
+uint64_t demo_allocate_attempts = 0U;
+uint64_t demo_allocated = 0U;
 volatile uint32_t g_eth_tx_done = 0;
 
 void HAL_ETH_RxAllocateCallback(uint8_t **buff)
 {
-  static uint32_t rx_buffer_index = 0U;
   if (buff == NULL) { return; }
-  *buff = EthRxBuffer[rx_buffer_index];
-  rx_buffer_index = (rx_buffer_index + 1U) % ETH_RX_DESC_CNT;
+
+  demo_allocate_attempts++;
+
+  // Allocate constant size ETH_RX_BUFFER_SIZE
+  ElasticQueueRef_t* ref = ElasticQueue_Allocate(&wan_rx_queue, ETH_RX_BUFFER_SIZE);
+  
+  if (ref != NULL) {
+    demo_allocated++;
+    *buff = ref->data;
+  } else {
+    *buff = NULL; // Queue out of space, let the HAL know allocation failed
+  }
 }
 
 void HAL_ETH_RxLinkCallback(void **pStart, void **pEnd, uint8_t *buff, uint16_t len)
 {
-  static uint32_t rx_node_index = 0U;
-  ETH_BufferTypeDef *rx_buffer = &EthRxBufferNodes[rx_node_index];
   if ((pStart == NULL) || (pEnd == NULL) || (buff == NULL)) { return; }
-  rx_buffer->buffer = buff;
-  rx_buffer->len = len;
-  rx_buffer->next = NULL;
-  if (*pStart == NULL) {
-    *pStart = rx_buffer;
-  } else {
-    ((ETH_BufferTypeDef *)(*pEnd))->next = rx_buffer;
+
+  ElasticQueueRef_t *ref = ElasticQueue_GetRefByBuffer(&wan_rx_queue, buff);
+  if (ref != NULL) {
+    ref->len = len;
+	// Notify queue that buffer is ready for consumption
+    ElasticQueue_Commit(&wan_rx_queue, ref);
+
+    if (*pStart == NULL) {
+      *pStart = ref;
+    }
+    *pEnd = ref;
   }
-  *pEnd = rx_buffer;
-  rx_node_index = (rx_node_index + 1U) % ETH_RX_DESC_CNT;
 }
 
 void HAL_ETH_TxCpltCallback(ETH_HandleTypeDef *heth_ptr)
 {
-    (void)heth_ptr;
     g_eth_tx_done++;
-    packet_leases-=1;
+    // TODO: need to call Done on a buffer here
 }
 
 const char *Demo_EtherTypeName(uint16_t ether_type)
@@ -135,22 +145,11 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
   }
 }
 
-void Demo_ProcessLanPackets(void)
+// We need to call HAL_ETH_ReadData because it triggers HAL_ETH_RxLinkCallback
+void WAN_TriggerPacketRead(void)
 {
   void *rx_packet = NULL;
-  uint32_t desccount = 0;
-  while (1) {
-      if (packet_leases == 0) {
-        HAL_ETH_Extension_ReturnRxDescriptor(&heth, desccount);
-          if (HAL_ETH_ReadData(&heth, &rx_packet, &desccount) == HAL_OK) {
-            packet_leases=2;
-            Demo_TrySendFrameFromRx((ETH_BufferTypeDef *)rx_packet);
-            Demo_ReportPacket((ETH_BufferTypeDef *)rx_packet);
-            rx_packet = NULL;
-            packet_leases-=1;
-          }
-      }
-  }
+  HAL_ETH_ReadData(&heth, &rx_packet);
 }
 
 void MX_ETH_Init(void)

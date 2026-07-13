@@ -139,12 +139,20 @@ void main_loop(void) {
 	/* Infinite loop */
 	while (1)
 	{
-		// TODO: remove this
-		Demo_ProcessLanPackets();
-
 		// 1) DMA RX-to-TX start. Trigger: can lock RX queue.
 		if (ElasticQueue_IsLockable(&wan_rx_queue)) {
 			// TODO: implement
+
+            // We pass it to the reporter as if it was ETH_BufferTypeDef
+            // because their data/len fields align exactly in memory.
+            uint8_t *out_buf;
+            size_t out_len;
+            if (ElasticQueue_Lock(&wan_rx_queue, 1, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
+
+            	Demo_ReportPacket(out_buf, out_len, wan_rx_queue.num_refs);
+
+                ElasticQueue_Done(&wan_rx_queue);
+            }
 		}
 		if (ElasticQueue_IsLockable(&usb_rx_queue)) {
 			// TODO: implement
@@ -168,7 +176,9 @@ void main_loop(void) {
 		// ----------------------------------------------------------
 
 		// 3) HW to RX. Trigger: flag set by HW IRQ, implementation may vary for HW.
-		// TODO: implement
+		WAN_TriggerPacketRead();
+
+		// TODO: implement the rest
 
 		// ----------------------------------------------------------
 

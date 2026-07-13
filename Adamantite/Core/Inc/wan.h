@@ -24,12 +24,13 @@ extern ETH_HandleTypeDef heth;
 extern uint64_t demo_packet_count;
 extern volatile uint32_t g_eth_tx_done;
 
+
 void MX_ETH_Init(void);
+void WAN_TriggerPacketRead(void);
 DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
                                           uint16_t ether_type,
                                           const uint8_t *payload,
                                           uint16_t payload_len);
-void Demo_ProcessLanPackets(void);
 const char *Demo_EtherTypeName(uint16_t ether_type);
 
 #endif /* __WAN_H */
