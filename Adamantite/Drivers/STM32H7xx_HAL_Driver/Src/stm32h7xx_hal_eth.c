@@ -1036,15 +1036,6 @@ HAL_StatusTypeDef HAL_ETH_Transmit_IT(ETH_HandleTypeDef *heth, ETH_TxPacketConfi
   }
 }
 
-void HAL_ETH_Extension_ReturnRxDescriptor(ETH_HandleTypeDef *heth, uint32_t desccnt) {
-	heth->RxDescList.RxBuildDescCnt += desccnt;
-	if ((heth->RxDescList.RxBuildDescCnt) != 0U)
-	{
-	  // Update Descriptors
-	  ETH_UpdateDescriptor(heth);
-	}
-}
-
 /**
   * @brief  Read a received packet.
   * @param  heth: pointer to a ETH_HandleTypeDef structure that contains
@@ -1052,7 +1043,7 @@ void HAL_ETH_Extension_ReturnRxDescriptor(ETH_HandleTypeDef *heth, uint32_t desc
   * @param  pAppBuff: Pointer to an application buffer to receive the packet.
   * @retval HAL status
   */
-HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff, uint32_t* desccnt_out)
+HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff)
 {
   uint32_t descidx;
   uint32_t descidx_next;
@@ -1063,7 +1054,7 @@ HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff, uin
   uint32_t bufflength;
   uint8_t rxdataready = 0U;
 
-  if (pAppBuff == NULL || desccnt_out == NULL)
+  if (pAppBuff == NULL)
   {
     heth->ErrorCode |= HAL_ETH_ERROR_PARAM;
     return HAL_ERROR;
@@ -1145,7 +1136,12 @@ HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff, uin
     desccnt++;
   }
 
-  *desccnt_out = desccnt;
+  heth->RxDescList.RxBuildDescCnt += desccnt;
+  if ((heth->RxDescList.RxBuildDescCnt) != 0U)
+  {
+    /* Update Descriptors */
+    ETH_UpdateDescriptor(heth);
+  }
 
   heth->RxDescList.RxDescIdx = descidx;
 
