@@ -34,6 +34,12 @@ typedef struct {
         uint8_t current_dest_idx;
 } DmaMemToMem_t;
 
+/* Error codes for DMA operations */
+#define DMA_BROADCAST_OK               0
+#define DMA_BROADCAST_ERR_INVAL       -1
+#define DMA_BROADCAST_ERR_BUSY        -2
+#define DMA_BROADCAST_ERR_NO_QUEUES   -3
+
 /**
  * @brief Initialize a DMA wrapper structure with its hardware handle
  */
@@ -51,7 +57,7 @@ void DmaMemToMem_Init(DmaMemToMem_t *dma_ctx, DMA_HandleTypeDef *hdma);
  * @param user_data    Arbitrary pointer to pass to the callback
  * @param src_q        (Optional) Source queue to call ElasticQueue_Done() on when complete
  * 
- * @return 0 on success, -1 if DMA is busy, invalid params, or error
+ * @return DMA_BROADCAST_OK on success, or a negative DMA_BROADCAST_ERR_* code on failure
  */
 int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx, 
                                const uint8_t *src, 
