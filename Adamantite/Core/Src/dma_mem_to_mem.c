@@ -69,8 +69,8 @@ int DmaMemToMem_StartBroadcast(DmaMemToMem_t *dma_ctx,
         ElasticQueueRef_t *ref = ElasticQueue_Allocate(dma_ctx->dest_queues[dma_ctx->current_dest_idx], src_ref->len);
         if (ref) {
             dma_ctx->current_allocated_ref = ref;
+            dma_ctx->state = DMA_STATE_RUNNING;
             if (HAL_DMA_Start_IT(dma_ctx->hdma, (uint32_t)src_ref->data, (uint32_t)ref->data, src_ref->len) == HAL_OK) {
-                dma_ctx->state = DMA_STATE_RUNNING;
                 return DMA_BROADCAST_OK; // Successfully started
             }
             // If HAL_DMA_Start fails, we allocated space but failed to copy. It will be abandoned.
@@ -122,11 +122,11 @@ void DmaMemToMem_Process(DmaMemToMem_t *dma_ctx)
         ElasticQueueRef_t *ref = ElasticQueue_Allocate(dma_ctx->dest_queues[dma_ctx->current_dest_idx], src_ref->len);
         if (ref) {
             dma_ctx->current_allocated_ref = ref;
+            dma_ctx->state = DMA_STATE_RUNNING;
             if (HAL_DMA_Start_IT(dma_ctx->hdma, 
                                  (uint32_t)src_ref->data, 
                                  (uint32_t)ref->data, 
                                  src_ref->len) == HAL_OK) {
-                dma_ctx->state = DMA_STATE_RUNNING;
                 return; // Wait for the next transfer complete interrupt
             }
             ElasticQueue_Abandon(dma_ctx->dest_queues[dma_ctx->current_dest_idx], ref);
