@@ -22,13 +22,16 @@ typedef enum {
  * @brief Structure to track the state of a single DMA stream wrapper
  */
 typedef struct {
+    // Hardware DMA handle
     DMA_HandleTypeDef * const hdma;
-    ElasticQueue_t * const source_queue;
-    
+
     // Status of the last/current operation
     DmaMemToMemState_t state;
-    
-    // Lazy broadcast tracking
+
+    // Source queue
+    ElasticQueue_t * const source_queue;
+
+    // Destination queues
     ElasticQueue_t *dest_queues[DMA_MAX_BROADCAST_DESTS];
     ElasticQueueRef_t *current_allocated_ref;
     uint8_t num_dests;
