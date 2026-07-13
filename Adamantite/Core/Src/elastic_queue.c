@@ -220,3 +220,39 @@ void ElasticQueue_Abort(ElasticQueue_t *q)
     q->head_ref = (q->head_ref + 1) % q->max_refs;
     q->num_refs--;
 }
+
+bool ElasticQueue_IsFull(ElasticQueue_t *q, size_t n)
+{
+    if (n == 0 || n > q->area_len) { return true; }
+    if (q->num_refs >= q->max_refs) { return true; }
+
+    if (q->num_refs == 0) {
+        return false;
+    }
+
+    size_t head_idx = q->head_ref;
+    size_t last_idx = (q->tail_ref == 0) ? (q->max_refs - 1) : (q->tail_ref - 1);
+
+    ElasticQueueRef_t *first = &q->refs[head_idx];
+    ElasticQueueRef_t *last = &q->refs[last_idx];
+
+    size_t first_offset = first->data - q->area_start;
+    size_t last_offset = last->data - q->area_start;
+    size_t last_end = last_offset + last->len;
+
+    if (last_offset >= first_offset) {
+        if (q->area_len - last_end >= n) {
+            return false;
+        } else if (first_offset >= n) {
+            return false;
+        } else {
+            return true;
+        }
+    } else {
+        if (first_offset - last_end >= n) {
+            return false;
+        } else {
+            return true;
+        }
+    }
+}

@@ -46,6 +46,14 @@ void ElasticQueue_Init(ElasticQueue_t *q, uint8_t *area_start, size_t area_len, 
 ElasticQueueRef_t* ElasticQueue_Allocate(ElasticQueue_t *q, size_t n);
 
 /**
+ * @brief Check if the queue is full (cannot allocate n bytes or out of refs).
+ * @param q Pointer to the queue.
+ * @param n Size of the buffer to check for.
+ * @return true if it cannot accommodate n bytes, false if it can.
+ */
+bool ElasticQueue_IsFull(ElasticQueue_t *q, size_t n);
+
+/**
  * @brief Mark a previously allocated buffer as fully written (ready to read).
  *        Fires the queue's ready_cb if one is configured.
  */
