@@ -282,6 +282,14 @@ int main(void)
   {
     Error_Handler();
   }
+
+  // This is needed for sniffer
+  ETH_MACFilterConfigTypeDef filter;
+  HAL_ETH_GetMACFilterConfig(&heth, &filter);
+  filter.PromiscuousMode = ENABLE;
+  filter.ReceiveAllMode  = ENABLE;
+  HAL_ETH_SetMACFilterConfig(&heth, &filter);
+
   /* USER CODE END 2 */
 
   /* USER CODE MAIN LOOP */
