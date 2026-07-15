@@ -130,3 +130,4 @@ uint8_t USB_CDC_IsConfigured(void);
 #endif
 
 #endif /* __USBD_CDC_IF_H__ */
+

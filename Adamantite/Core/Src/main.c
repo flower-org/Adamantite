@@ -148,7 +148,6 @@ void HAL_DMA_XferCpltCallback_Stream5(DMA_HandleTypeDef *hdma) { DmaMemToMem_Tra
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* USER CODE END 0 */
 void LED_Init(void)
 {
     // Enable GPIOG clock
@@ -249,6 +248,7 @@ void main_loop(void) {
 		}
 	}
 }
+/* USER CODE END 0 */
 
 /**
   * @brief  The application entry point.
@@ -256,6 +256,11 @@ void main_loop(void) {
   */
 int main(void)
 {
+
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
   /* MPU Configuration--------------------------------------------------------*/
   MPU_Config();
 
@@ -264,10 +269,16 @@ int main(void)
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
   /* Configure the system clock */
   SystemClock_Config();
 
-  LED_Init();             // initialize PG7 LED
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -417,8 +428,14 @@ int main(void)
 
   /* USER CODE END 2 */
 
-  /* USER CODE MAIN LOOP */
-  main_loop();
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+    main_loop();
+    /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
 }
 
