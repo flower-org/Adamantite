@@ -18,13 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include <stdio.h>
 #include "string.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "wan.h"
+#include <stdio.h>
 #include "usb_fs.h"
 /* USER CODE END Includes */
 
@@ -433,8 +433,9 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    main_loop();
+
     /* USER CODE BEGIN 3 */
+    main_loop();
   }
   /* USER CODE END 3 */
 }
