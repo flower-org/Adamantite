@@ -21,11 +21,11 @@ typedef enum
 } DemoLanTxStatus;
 
 extern ETH_HandleTypeDef heth;
+extern ETH_TxPacketConfig TxConfig;
 extern uint64_t demo_packet_count;
 extern volatile uint32_t g_eth_tx_done;
 
 
-void MX_ETH_Init(void);
 void WAN_TriggerPacketRead(void);
 DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
                                           uint16_t ether_type,
