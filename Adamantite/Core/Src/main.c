@@ -288,7 +288,7 @@ int main(void)
   MX_ETH_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  DM9051_Init();
+  DM9051_Init(&hspi1, GPIOA, GPIO_PIN_4);
 
   // Initialize all Elastic Queues
   ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
