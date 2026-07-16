@@ -103,7 +103,25 @@ void DM9051_Init(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin
   volatile uint8_t bmsr_h = spi_rx[1];
   (void)bmsr_h;
 
-  // Breakpoint here!
+  // 11. Configure DM9051 Interrupts
+  // Set Interrupt Polarity in INTCR (Register 0x39) to Active Low (0x00)
+  spi_tx[0] = 0x80 | 0x39; spi_tx[1] = 0x00;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+
+  // Clear any pending interrupts in ISR (Register 0x7E)
+  spi_tx[0] = 0x80 | 0x7E; spi_tx[1] = 0xFF;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+
+  // Enable interrupts in IMR (Register 0xFF)
+  // 0x80 (SRAM pointer auto-return) | 0x01 (Packet Received) = 0x81
+  spi_tx[0] = 0x80 | 0xFF; spi_tx[1] = 0x81;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
 }
 
 // Write to MAC Register
