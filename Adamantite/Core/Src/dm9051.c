@@ -1,6 +1,10 @@
 #include "dm9051.h"
 #include <string.h>
 
+// Forward declarations for static MAC access functions
+static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val);
+static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg);
+
 uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg)
 {
   uint8_t spi_tx[2];
@@ -44,61 +48,6 @@ uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t
   return phy_data;
 }
 
-void DM9051_Init(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin)
-{
-  // DM9051 PHY Wake-Up & Read
-  uint8_t spi_tx[2];
-  uint8_t spi_rx[2];
-
-  // 1. GPCR: GEP Output
-  spi_tx[0] = 0x80 | 0x1E; spi_tx[1] = 0x01;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 2. GPR: Power ON internal PHY BEFORE core reset!
-  spi_tx[0] = 0x80 | 0x1F; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  HAL_Delay(2); // Mandatory delay after PHY power on
-
-  // 3. NCR: Core Reset
-  spi_tx[0] = 0x80 | 0x00; spi_tx[1] = 0x01;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  HAL_Delay(2); // Wait for reset
-
-  // 4. Clear NCR Reset
-  spi_tx[0] = 0x80 | 0x00; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 5. Configure DM9051 Interrupts
-  // Set Interrupt Polarity in INTCR (Register 0x39) to Active Low (0x00)
-  spi_tx[0] = 0x80 | 0x39; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 6. Clear any pending interrupts in ISR (Register 0x7E)
-  spi_tx[0] = 0x80 | 0x7E; spi_tx[1] = 0xFF;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 7. Enable interrupts in IMR (Register 0xFF)
-  // 0x80 (SRAM pointer auto-return) | 0x01 (Packet Received) = 0x81
-  spi_tx[0] = 0x80 | 0xFF; spi_tx[1] = 0x81;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-}
-
 // Write to MAC Register
 static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val) {
     uint8_t spi_tx[2] = {0x80 | reg, val};
@@ -117,10 +66,58 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
     return spi_rx[1];
 }
 
+void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
+{
+  // 1. GPCR: GEP Output
+  DM9051_WriteReg(hdm, DM9051_GPCR, 0x01);
+
+  // 2. GPR: Power ON internal PHY BEFORE core reset!
+  DM9051_WriteReg(hdm, DM9051_GPR, 0x00);
+  
+  HAL_Delay(2); // Mandatory delay after PHY power on
+
+  // 3. NCR: Core Reset
+  DM9051_WriteReg(hdm, DM9051_NCR, 0x01);
+
+  HAL_Delay(2); // Wait for reset
+
+  // 4. Clear NCR Reset
+  DM9051_WriteReg(hdm, DM9051_NCR, 0x00);
+
+  // 5. Check Device ID
+  uint16_t vid = (DM9051_ReadReg(hdm, DM9051_VIDH) << 8) | DM9051_ReadReg(hdm, DM9051_VIDL);
+  uint16_t pid = (DM9051_ReadReg(hdm, DM9051_PIDH) << 8) | DM9051_ReadReg(hdm, DM9051_PIDL);
+  
+  // Optional: Could return an error if vid != 0x0A46 or pid != 0x9051
+  (void)vid;
+  (void)pid;
+
+  // 6. Set MAC Address (Registers 0x10 to 0x15)
+  for (int i = 0; i < 6; i++) {
+    DM9051_WriteReg(hdm, DM9051_PAR + i, mac_addr[i]);
+  }
+
+  // 7. Configure DM9051 Interrupts
+  // Set Interrupt Polarity in INTCR (Register 0x39) to Active Low (0x00)
+  DM9051_WriteReg(hdm, DM9051_INTCR, 0x00);
+
+  // 8. Clear any pending interrupts in ISR (Register 0x7E)
+  DM9051_WriteReg(hdm, DM9051_ISR, 0xFF);
+
+  // 9. Enable interrupts in IMR (Register 0xFF)
+  // 0x80 (SRAM pointer auto-return) | 0x01 (Packet Received) = 0x81
+  DM9051_WriteReg(hdm, DM9051_IMR, 0x81);
+
+  // 10. Enable Receiver in RCR (Register 0x05)
+  DM9051_WriteReg(hdm, DM9051_RCR, DM9051_RCR_DIS_LONG | DM9051_RCR_DIS_CRC | 
+                             DM9051_RCR_ALL | DM9051_RCR_RUNT | 
+                             DM9051_RCR_PRMSC | DM9051_RCR_RXEN);
+}
+
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t len) {
     // 1. Wait for NSR TX ready (TX1END or TX2END)
     // In a real application, you'd want a non-blocking timeout or interrupt driven approach
-    while(!(DM9051_ReadReg(hdm, 0x01) & 0x0C)); 
+    while(!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)); 
     
     // 2. Prepare the DMA buffer
     hdm->tx_buf[0] = 0xF8; // MWCMD (Memory Write with SPI Write bit 0x80)
@@ -137,25 +134,25 @@ void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
 
     // 2. Write TX length
-    DM9051_WriteReg(hdm, 0x7C, hdm->tx_len & 0xFF);        // TXPLL
-    DM9051_WriteReg(hdm, 0x7D, (hdm->tx_len >> 8) & 0xFF); // TXPLH
+    DM9051_WriteReg(hdm, DM9051_TXPLL, hdm->tx_len & 0xFF);        // TXPLL
+    DM9051_WriteReg(hdm, DM9051_TXPLH, (hdm->tx_len >> 8) & 0xFF); // TXPLH
 
     // 3. Issue TX request
-    DM9051_WriteReg(hdm, 0x02, 0x01); // TCR_TXREQ
+    DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
 }
 
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     // 1. Poll MRCMDX (0x70) to see if packet is ready
-    uint8_t ready = DM9051_ReadReg(hdm, 0x70);
+    uint8_t ready = DM9051_ReadReg(hdm, DM9051_MRCMDX);
     if (ready != 0x01 && ready != 0x00) {
         // Error state, need to reset FIFO
-        DM9051_WriteReg(hdm, 0x7E, 0x80); // ISR_STOP_MRCMD
+        DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
         return;
     }
     if (ready == 0x00) return; // No packet
 
     // 2. Read Rx Header (4 bytes) using MRCMD (0x72)
-    uint8_t rx_hdr_tx[5] = {0x72, 0, 0, 0, 0};
+    uint8_t rx_hdr_tx[5] = {DM9051_MRCMD, 0, 0, 0, 0};
     uint8_t rx_hdr_rx[5] = {0};
     
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
@@ -163,7 +160,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
     
     // Stop memory read for now to process header
-    DM9051_WriteReg(hdm, 0x7E, 0x80); // ISR_STOP_MRCMD
+    DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
     
     // hdr_rx[0] is dummy. hdr_rx[1]=Ready Byte, hdr_rx[2]=Status, hdr_rx[3]=LenL, hdr_rx[4]=LenH
     uint16_t rxlen = rx_hdr_rx[3] | (rx_hdr_rx[4] << 8);
@@ -177,7 +174,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     hdm->rx_len = rxlen;
     
     // 3. Start DMA for payload
-    hdm->tx_buf[0] = 0x72; // Re-use tx_buf for the SPI dummy clocks
+    hdm->tx_buf[0] = DM9051_MRCMD; // Re-use tx_buf for the SPI dummy clocks
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
     HAL_SPI_TransmitReceive_DMA(hdm->hspi, hdm->tx_buf, hdm->rx_buf, rxlen + 1); // +1 for MRCMD byte
 }
@@ -187,7 +184,7 @@ void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
     
     // 2. Clear MRCMD
-    DM9051_WriteReg(hdm, 0x7E, 0x80); // ISR_STOP_MRCMD
+    DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
     
     // Packet is now in hdm->rx_buf[1] through hdm->rx_buf[rxlen]
 }

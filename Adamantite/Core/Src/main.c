@@ -109,6 +109,8 @@ DMA_HandleTypeDef hdma_memtomem_dma1_stream3;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream4;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream5;
 /* USER CODE BEGIN PV */
+DM9051_HandleTypeDef hdm9051;
+uint8_t dm9051_mac[6] = {0x02, 0x00, 0x00, 0x11, 0x22, 0x33}; // Locally administered MAC
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -288,7 +290,10 @@ int main(void)
   MX_ETH_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  DM9051_Init(&hspi1, GPIOA, GPIO_PIN_4);
+  hdm9051.hspi = &hspi1;
+  hdm9051.cs_port = GPIOA;
+  hdm9051.cs_pin = GPIO_PIN_4;
+  DM9051_Init(&hdm9051, dm9051_mac);
 
   // Initialize all Elastic Queues
   ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
