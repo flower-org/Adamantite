@@ -1,6 +1,49 @@
 #include "dm9051.h"
 #include <string.h>
 
+uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg)
+{
+  uint8_t spi_tx[2];
+  uint8_t spi_rx[2];
+  uint16_t phy_data = 0;
+
+  // 1. Enable MAC to access PHY via EPAR (Register phy_reg)
+  spi_tx[0] = 0x80 | 0x0C; spi_tx[1] = 0x40 | phy_reg;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+
+  // 2. Issue PHY Read Command (EPCR)
+  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x0C; // EPOS | ERPRR
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+  
+  HAL_Delay(1); // Wait for PHY read to complete
+
+  // 3. Clear PHY Read Command
+  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x00;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+  
+  // 4. Read PHY Data Low
+  spi_tx[0] = 0x0D; spi_tx[1] = 0x00;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+  phy_data = spi_rx[1];
+
+  // 5. Read PHY Data High
+  spi_tx[0] = 0x0E; spi_tx[1] = 0x00;
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
+  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
+  phy_data |= (spi_rx[1] << 8);
+
+  return phy_data;
+}
+
 void DM9051_Init(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin)
 {
   // DM9051 PHY Wake-Up & Read
@@ -35,88 +78,20 @@ void DM9051_Init(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin
   HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
 
-  // 5. Enable MAC to access PHY via EPAR (Register 0 BMCR)
-  spi_tx[0] = 0x80 | 0x0C; spi_tx[1] = 0x40 | 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 6. Issue PHY Read Command (EPCR)
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x0C; // EPOS | ERPRR
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  HAL_Delay(1); // Wait for PHY read to complete (Linux driver polls ERRE bit)
-
-  // 7. Clear PHY Read Command
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  // 8. Read PHY Data Low
-  spi_tx[0] = 0x0D; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  volatile uint8_t bmcr_l = spi_rx[1];
-  (void)bmcr_l;
-
-  // 9. Read PHY Data High
-  spi_tx[0] = 0x0E; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  volatile uint8_t bmcr_h = spi_rx[1];
-  (void)bmcr_h;
-
-  // 10. Read PHY BMSR (Register 1)
-  spi_tx[0] = 0x80 | 0x0C; spi_tx[1] = 0x40 | 0x01; // EPAR: PHY address 0x40 | Register 1
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x0C; // EPCR: Issue Read
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  HAL_Delay(1); // Wait
-
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x00; // EPCR: Clear Read
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  spi_tx[0] = 0x0D; spi_tx[1] = 0x00; // Read Low
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  volatile uint8_t bmsr_l = spi_rx[1];
-  (void)bmsr_l;
-
-  spi_tx[0] = 0x0E; spi_tx[1] = 0x00; // Read High
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  volatile uint8_t bmsr_h = spi_rx[1];
-  (void)bmsr_h;
-
-  // 11. Configure DM9051 Interrupts
+  // 5. Configure DM9051 Interrupts
   // Set Interrupt Polarity in INTCR (Register 0x39) to Active Low (0x00)
   spi_tx[0] = 0x80 | 0x39; spi_tx[1] = 0x00;
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
   HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
 
-  // Clear any pending interrupts in ISR (Register 0x7E)
+  // 6. Clear any pending interrupts in ISR (Register 0x7E)
   spi_tx[0] = 0x80 | 0x7E; spi_tx[1] = 0xFF;
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
   HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
 
-  // Enable interrupts in IMR (Register 0xFF)
+  // 7. Enable interrupts in IMR (Register 0xFF)
   // 0x80 (SRAM pointer auto-return) | 0x01 (Packet Received) = 0x81
   spi_tx[0] = 0x80 | 0xFF; spi_tx[1] = 0x81;
   HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
