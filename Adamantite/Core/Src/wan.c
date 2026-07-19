@@ -22,7 +22,7 @@ void HAL_ETH_RxAllocateCallback(uint8_t **buff)
   demo_allocate_attempts++;
 
   // Allocate constant size ETH_RX_BUFFER_SIZE
-  ElasticQueueRef_t* ref = ElasticQueue_Allocate(&wan_rx_queue, ETH_RX_BUFFER_SIZE);
+  ElasticQueueRef_t* ref = ElasticQueue_Allocate(&wan_rx_queue, ETH_BUFFER_SIZE);
   
   if (ref != NULL) {
     demo_allocated++;
@@ -128,7 +128,7 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
 // We need to call HAL_ETH_ReadData because it triggers HAL_ETH_RxLinkCallback
 void WAN_TriggerPacketRead(void)
 {
-  if (!ElasticQueue_IsFull(&wan_rx_queue, ETH_RX_BUFFER_SIZE)) {
+  if (!ElasticQueue_IsFull(&wan_rx_queue, ETH_BUFFER_SIZE)) {
       void *rx_packet = NULL;
       HAL_ETH_ReadData(&heth, &rx_packet);
   }

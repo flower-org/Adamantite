@@ -110,7 +110,7 @@ DMA_HandleTypeDef hdma_memtomem_dma1_stream3;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream4;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream5;
 /* USER CODE BEGIN PV */
-uint8_t global_dma_trash_buffer[ETH_RX_BUFFER_SIZE];
+uint8_t global_dma_trash_buffer[ETH_BUFFER_SIZE];
 
 DM9051_HandleTypeDef hdm9051_1;
 uint8_t dm9051_mac[6] = {0x02, 0x00, 0x00, 0x11, 0x22, 0x33}; // Locally administered MAC
@@ -189,7 +189,7 @@ void main_loop(void) {
 	            uint8_t *out_buf;
 	            size_t out_len;
 	            if (ElasticQueue_Lock(&wan_rx_queue, 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
-	                ElasticQueue_t *dests[] = { &usb_tx_queue, &wan_tx_queue };
+	                ElasticQueue_t *dests[] = { &usb_tx_queue, &lan_tx_queues[0] };
 	                DmaMemToMem_StartBroadcast(&wan_rx_dma_ctx_stream, dests, 2);
 	            }
 		    }
@@ -228,7 +228,7 @@ void main_loop(void) {
 
 		for (int i = 0; i < LAN_COUNT; i++) {
     		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
-		    if (lan_dm9051 && lan_dm9051->rx_packet_ready && lan_dm9051->rx_dma_ready) {
+		    if (lan_dm9051 && lan_dm9051->rx_packet_ready && lan_dm9051->dma_ready) {
                 DM9051_ReadPacket_DMA_Start(lan_dm9051);
 		    }
 		}
@@ -272,9 +272,12 @@ void main_loop(void) {
             }
 		}
 		for (int i = 0; i < LAN_COUNT; i++) {
-			if (ElasticQueue_IsLockable(&lan_tx_queues[i])) {
-				// TODO: implement
-			}
+            DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
+            if (lan_dm9051) {
+    			if (lan_dm9051->dma_ready && ElasticQueue_IsLockable(lan_dm9051->lan_tx_queue)) {
+					DM9051_WritePacket_DMA(lan_dm9051_interfaces[i]);
+    			}
+			} // else try ENCJ?
 		}
 	}
 }

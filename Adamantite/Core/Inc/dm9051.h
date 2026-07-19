@@ -52,13 +52,18 @@ typedef struct {
     ElasticQueueRef_t* current_rx_packet;
 
     bool rx_packet_ready;
-    bool rx_dma_ready;  // Tracks if DMA is idle and ready for a new transaction
+
+    // On STM32 SPI we have 2 physical SPI DMA channels and we can use both RX and TX simultaneously.
+    // However DM9051 doesn't support that, so we have to alternate.
+    // Moreover, we have to use both RX and TX to avoid SPI error HAL_SPI_ERROR_OVR.
+    // That's why logically it's pretty much the same DMA.
+    bool dma_ready;
 } DM9051_HandleTypeDef;
 
 uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg);
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr);
 
-void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t len);
+void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm);
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm);
 
 // To be called from HAL_SPI_TxCpltCallback

@@ -41,7 +41,7 @@ extern "C" {
 
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
-#define ETH_RX_BUFFER_SIZE 1536U
+#define ETH_BUFFER_SIZE 1536U
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/

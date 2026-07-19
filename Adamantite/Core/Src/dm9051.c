@@ -5,7 +5,7 @@
 // TODO: change all transmits to interrupts for best CPU utilization?
 
 // Global trash buffer for safely dropping packets via DMA without CPU blocking
-extern uint8_t global_dma_trash_buffer[ETH_RX_BUFFER_SIZE];
+extern uint8_t global_dma_trash_buffer[ETH_BUFFER_SIZE];
 static uint32_t start_count;
 static uint32_t end_count;
 // Forward declarations for static MAC access functions
@@ -35,7 +35,7 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
 
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 {
-  hdm->rx_dma_ready = true;
+  hdm->dma_ready = true;
 
   // 1. GPCR: GEP Output
   DM9051_WriteReg(hdm, DM9051_GPCR, 0x01);
@@ -85,47 +85,58 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 
 // ================================ WRITE ================================
 
-void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t len) {
-    /*
-    hdm->tx_dma_ready = false;
+void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
+    if (!hdm->dma_ready) {
+        return;
+    }
+
+    uint8_t *data;
+    size_t len;
+    if (ElasticQueue_Lock(hdm->lan_tx_queue, 1, &data, &len) != ELASTIC_QUEUE_OK) {
+        return;
+    }
 
     // 1. Wait for NSR TX ready (TX1END or TX2END)
     // In a real application, you'd want a non-blocking timeout or interrupt driven approach
-    while(!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C));
+    if (!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)) return;
     
-    // 2. Prepare the DMA buffer
-    hdm->tx_buf[0] = 0xF8; // MWCMD (Memory Write with SPI Write bit 0x80)
-    memcpy(&hdm->tx_buf[1], data, len);
-    hdm->tx_len = len;
-
-    // 3. Start SPI DMA
+    // 2. Prepare the DMA buffer by sending MWCMD first
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive_DMA(hdm->hspi, hdm->tx_buf, global_dma_trash_buffer, len + 1);
-    */
+    uint8_t cmd = 0xF8; // MWCMD (Memory Write with SPI Write bit 0x80)
+    uint8_t cmd_rx;
+    HAL_SPI_TransmitReceive(hdm->hspi, &cmd, &cmd_rx, 1, 10);
+
+    // 3. Start SPI DMA for the payload
+    hdm->dma_ready = false;
+    HAL_SPI_TransmitReceive_DMA(hdm->hspi, data, global_dma_trash_buffer, len);
 }
 
 void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
-    /*
+    hdm->dma_ready = true;
+
     // 1. Deassert CS
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
 
-    // 2. Write TX length
-    DM9051_WriteReg(hdm, DM9051_TXPLL, hdm->tx_len & 0xFF);        // TXPLL
-    DM9051_WriteReg(hdm, DM9051_TXPLH, (hdm->tx_len >> 8) & 0xFF); // TXPLH
+    ElasticQueueRef_t* ref = ElasticQueue_PeekLocked(hdm->lan_tx_queue);
+    if (ref) {
+        // 2. Write TX length
+        DM9051_WriteReg(hdm, DM9051_TXPLL, ref->len & 0xFF);        // TXPLL
+        DM9051_WriteReg(hdm, DM9051_TXPLH, (ref->len >> 8) & 0xFF); // TXPLH
 
-    // 3. Issue TX request
-    DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
-    
-    // 4. Clear Packet Transmitted Interrupt
-    DM9051_WriteReg(hdm, DM9051_ISR, 0x02); // ISR_PTS (bit 1)
-    
-    hdm->tx_dma_ready = true;
-    */
+        // 3. Issue TX request
+        DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
+
+        ElasticQueue_Done(hdm->lan_tx_queue);
+    }
 }
 
 // ================================ READ ================================
 
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
+    if (!hdm->dma_ready) {
+        return;
+    }
+
     hdm->rx_packet_ready = 0;
 
     // 1. Poll MRCMDX (0x70) to see if packet is ready
@@ -172,7 +183,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     uint16_t rxlen = rx_hdr_rx[3] | (rx_hdr_rx[4] << 8);
 
     // Check for errors or huge packets
-    if ((rx_hdr_rx[2] & 0xBF) || rxlen > ETH_RX_BUFFER_SIZE) {
+    if ((rx_hdr_rx[2] & 0xBF) || rxlen > ETH_BUFFER_SIZE) {
         // Bad packet, reset required
         return;
     }
@@ -183,7 +194,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         hdm->current_rx_packet = ElasticQueue_Allocate(hdm->lan_rx_queue, rxlen);
     }
     if (hdm->lan_rx_queue && hdm->current_rx_packet) {
-        hdm->rx_dma_ready = false;
+        hdm->dma_ready = false;
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
         uint8_t cmd_rx;
@@ -192,7 +203,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         //Log_Printf("HAL_SPI_TransmitReceive_DMA! %d (NORMAL)\r\n", ++start_count);
     } else {
         // Drop packet using DMA to a global trash buffer to save CPU cycles
-        hdm->rx_dma_ready = false;
+        hdm->dma_ready = false;
         
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
@@ -209,7 +220,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
 void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
     //Log_Printf("DM9051_RxCpltCallback! %d (FREE)\r\n", ++end_count);
 
-    hdm->rx_dma_ready = true;
+    hdm->dma_ready = true;
 
     // 1. Deassert CS
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
