@@ -48,7 +48,9 @@ typedef struct {
 
     ElasticQueue_t* lan_rx_queue;
     ElasticQueue_t* lan_tx_queue;
-    
+
+    ElasticQueueRef_t* current_rx_packet;
+
     bool rx_packet_ready;
     bool rx_dma_ready;  // Tracks if DMA is idle and ready for a new transaction
 } DM9051_HandleTypeDef;

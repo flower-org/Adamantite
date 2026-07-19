@@ -4,11 +4,10 @@
 
 // TODO: change all transmits to interrupts for best CPU utilization?
 
-ElasticQueueRef_t* ref;
-
 // Global trash buffer for safely dropping packets via DMA without CPU blocking
 extern uint8_t global_dma_trash_buffer[ETH_RX_BUFFER_SIZE];
-
+static uint32_t start_count;
+static uint32_t end_count;
 // Forward declarations for static MAC access functions
 static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val);
 static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg);
@@ -172,22 +171,22 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     uint16_t rxlen = rx_hdr_rx[3] | (rx_hdr_rx[4] << 8);
 
     // Check for errors or huge packets
-    if ((rx_hdr_rx[2] & 0xBF) || rxlen > 1536) { 
+    if ((rx_hdr_rx[2] & 0xBF) || rxlen > ETH_RX_BUFFER_SIZE) {
         // Bad packet, reset required
         return;
     }
     
     // 3. Start DMA for payload
-    ref = NULL;
+    hdm->current_rx_packet = NULL;
     if (hdm->lan_rx_queue) {
-    	ref = ElasticQueue_Allocate(hdm->lan_rx_queue, rxlen);
+        hdm->current_rx_packet = ElasticQueue_Allocate(hdm->lan_rx_queue, rxlen);
     }
-    if (hdm->lan_rx_queue && ref) {
+    if (hdm->lan_rx_queue && hdm->current_rx_packet) {
         hdm->rx_dma_ready = false;
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
         HAL_SPI_Transmit(hdm->hspi, &cmd, 1, 10);
-        HAL_SPI_Receive_DMA(hdm->hspi, ref->data, ref->len);
+        HAL_SPI_Receive_DMA(hdm->hspi, hdm->current_rx_packet->data, hdm->current_rx_packet->len);
     } else {
         // Drop packet using DMA to a global trash buffer to save CPU cycles
         hdm->rx_dma_ready = false;
@@ -211,8 +210,8 @@ void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
     // 2. Clear MRCMD and Packet Received Interrupt
     DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01); // ISR_STOP_MRCMD (bit 7) | ISR_PRS (bit 0)
     
-    if (hdm->lan_rx_queue && ref) {
-        ElasticQueue_Commit(hdm->lan_rx_queue, ref);
-        ref = NULL;
+    if (hdm->lan_rx_queue && hdm->current_rx_packet) {
+        ElasticQueue_Commit(hdm->lan_rx_queue, hdm->current_rx_packet);
+        hdm->current_rx_packet = NULL;
     }
 }

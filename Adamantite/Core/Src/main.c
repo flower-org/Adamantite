@@ -512,7 +512,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -754,6 +754,23 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
     if(hspi->Instance == SPI1) {
         DM9051_TxCpltCallback(&hdm9051_1);
         //Log_Printf("DM9051 TX Cplt\r\n");
+    }
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi->Instance == SPI1) {
+        //Log_Printf("SPI Error! ErrorCode: 0x%08lX\r\n", hspi->ErrorCode);
+        
+        // If it is a DMA-related error (bit 4 set)
+        //if (hspi->ErrorCode & 0x00000010UL) { // HAL_SPI_ERROR_DMA
+            if (hspi->hdmatx != NULL && hspi->hdmatx->ErrorCode != 0) {
+                //Log_Printf("TX DMA Error: 0x%08lX\r\n", hspi->hdmatx->ErrorCode);
+            }
+            if (hspi->hdmarx != NULL && hspi->hdmarx->ErrorCode != 0) {
+                //Log_Printf("RX DMA Error: 0x%08lX\r\n", hspi->hdmarx->ErrorCode);
+            }
+        //}
     }
 }
 
