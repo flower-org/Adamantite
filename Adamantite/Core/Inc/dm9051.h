@@ -2,6 +2,7 @@
 #define __DM9051_H
 
 #include "main.h"
+#include "elastic_queue.h"
 
 // DM9051 Registers
 #define DM9051_NCR      0x00
@@ -38,17 +39,18 @@
 #define DM9051_RCR_HASH_ALL  0x80 // Hash All
 
 typedef struct {
-    SPI_HandleTypeDef *hspi;
-    GPIO_TypeDef *cs_port;
+    SPI_HandleTypeDef* hspi;
+    DMA_HandleTypeDef* hdma_rx;
+    DMA_HandleTypeDef* hdma_tx;
+
+    GPIO_TypeDef* cs_port;
     uint16_t cs_pin;
+
+    ElasticQueue_t* lan_rx_queue;
+    ElasticQueue_t* lan_tx_queue;
     
-    // TX Buffer: 1 byte for command (0xF8) + 1522 bytes for max Ethernet frame
-    uint8_t tx_buf[1524]; 
-    uint16_t tx_len;
-    
-    // RX Buffer
-    uint8_t rx_buf[1524];
-    uint16_t rx_len;
+    bool rx_packet_ready;
+    bool rx_dma_ready;  // Tracks if DMA is idle and ready for a new transaction
 } DM9051_HandleTypeDef;
 
 uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg);

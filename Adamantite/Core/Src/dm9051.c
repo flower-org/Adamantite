@@ -1,52 +1,12 @@
 #include "dm9051.h"
 #include <string.h>
+#include "log.h"
+
+ElasticQueueRef_t* ref;
 
 // Forward declarations for static MAC access functions
 static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val);
 static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg);
-
-uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg)
-{
-  uint8_t spi_tx[2];
-  uint8_t spi_rx[2];
-  uint16_t phy_data = 0;
-
-  // 1. Enable MAC to access PHY via EPAR (Register phy_reg)
-  spi_tx[0] = 0x80 | 0x0C; spi_tx[1] = 0x40 | phy_reg;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-
-  // 2. Issue PHY Read Command (EPCR)
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x0C; // EPOS | ERPRR
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  HAL_Delay(1); // Wait for PHY read to complete
-
-  // 3. Clear PHY Read Command
-  spi_tx[0] = 0x80 | 0x0B; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(hspi, spi_tx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  
-  // 4. Read PHY Data Low
-  spi_tx[0] = 0x0D; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  phy_data = spi_rx[1];
-
-  // 5. Read PHY Data High
-  spi_tx[0] = 0x0E; spi_tx[1] = 0x00;
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(hspi, spi_tx, spi_rx, 2, 100);
-  HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);
-  phy_data |= (spi_rx[1] << 8);
-
-  return phy_data;
-}
 
 // Write to MAC Register
 static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val) {
@@ -66,8 +26,12 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
     return spi_rx[1];
 }
 
+// ================================ INIT ================================
+
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 {
+  hdm->rx_dma_ready = true;
+
   // 1. GPCR: GEP Output
   DM9051_WriteReg(hdm, DM9051_GPCR, 0x01);
 
@@ -87,7 +51,7 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
   // 5. Check Device ID
   uint16_t vid = (DM9051_ReadReg(hdm, DM9051_VIDH) << 8) | DM9051_ReadReg(hdm, DM9051_VIDL);
   uint16_t pid = (DM9051_ReadReg(hdm, DM9051_PIDH) << 8) | DM9051_ReadReg(hdm, DM9051_PIDL);
-  
+
   // Optional: Could return an error if vid != 0x0A46 or pid != 0x9051
   (void)vid;
   (void)pid;
@@ -114,10 +78,15 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
                              DM9051_RCR_PRMSC | DM9051_RCR_RXEN);
 }
 
+// ================================ WRITE ================================
+
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t len) {
+    /*
+    hdm->tx_dma_ready = false;
+
     // 1. Wait for NSR TX ready (TX1END or TX2END)
     // In a real application, you'd want a non-blocking timeout or interrupt driven approach
-    while(!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)); 
+    while(!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C));
     
     // 2. Prepare the DMA buffer
     hdm->tx_buf[0] = 0xF8; // MWCMD (Memory Write with SPI Write bit 0x80)
@@ -127,9 +96,11 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t l
     // 3. Start SPI DMA
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
     HAL_SPI_Transmit_DMA(hdm->hspi, hdm->tx_buf, len + 1);
+    */
 }
 
 void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
+    /*
     // 1. Deassert CS
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
 
@@ -139,19 +110,49 @@ void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
 
     // 3. Issue TX request
     DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
+    
+    // 4. Clear Packet Transmitted Interrupt
+    DM9051_WriteReg(hdm, DM9051_ISR, 0x02); // ISR_PTS (bit 1)
+    
+    hdm->tx_dma_ready = true;
+    */
 }
 
+// ================================ READ ================================
+
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
+    hdm->rx_packet_ready = 0;
+
     // 1. Poll MRCMDX (0x70) to see if packet is ready
-    uint8_t ready = DM9051_ReadReg(hdm, DM9051_MRCMDX);
+    // We only need 2 bytes: 1 for the command, 1 to read the "Ready" byte.
+    uint8_t mrcmdx_tx[3] = {DM9051_MRCMDX, 0, 0};
+    uint8_t mrcmdx_rx[3] = {0};
+    
+    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
+    HAL_SPI_TransmitReceive(hdm->hspi, mrcmdx_tx, mrcmdx_rx, 3, 3);
+    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
+
+    uint8_t ready = mrcmdx_rx[2]; // The first byte after the command is the Ready byte
+    
     if (ready != 0x01 && ready != 0x00) {
         // Error state, need to reset FIFO
         DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
+        
+        // We should actually reset the pointer or MAC here if it's permanently stuck!
+        // But for now, just clear the interrupt so it doesn't lock up.
+        DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01);
+        
         return;
     }
-    if (ready == 0x00) return; // No packet
+    if (ready == 0x00) {
+        // Empty
+        DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01); // Clear INT anyway
+        return; // No packet
+    }
 
     // 2. Read Rx Header (4 bytes) using MRCMD (0x72)
+    hdm->rx_packet_ready = 1;
+
     uint8_t rx_hdr_tx[5] = {DM9051_MRCMD, 0, 0, 0, 0};
     uint8_t rx_hdr_rx[5] = {0};
     
@@ -162,29 +163,53 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     // Stop memory read for now to process header
     DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
     
-    // hdr_rx[0] is dummy. hdr_rx[1]=Ready Byte, hdr_rx[2]=Status, hdr_rx[3]=LenL, hdr_rx[4]=LenH
+    // rx_hdr_rx[1]=Ready Byte, rx_hdr_rx[2]=Status, rx_hdr_rx[3]=LenL, rx_hdr_rx[4]=LenH
     uint16_t rxlen = rx_hdr_rx[3] | (rx_hdr_rx[4] << 8);
-    
+
     // Check for errors or huge packets
     if ((rx_hdr_rx[2] & 0xBF) || rxlen > 1536) { 
         // Bad packet, reset required
-        return; 
+        return;
     }
     
-    hdm->rx_len = rxlen;
-    
     // 3. Start DMA for payload
-    hdm->tx_buf[0] = DM9051_MRCMD; // Re-use tx_buf for the SPI dummy clocks
-    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive_DMA(hdm->hspi, hdm->tx_buf, hdm->rx_buf, rxlen + 1); // +1 for MRCMD byte
+    ref = NULL;
+    if (hdm->lan_rx_queue) {
+    	ref = ElasticQueue_Allocate(hdm->lan_rx_queue, rxlen);
+    }
+    if (hdm->lan_rx_queue && ref) {
+        hdm->rx_dma_ready = false;
+        HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
+        uint8_t cmd = DM9051_MRCMD;
+        HAL_SPI_Transmit(hdm->hspi, &cmd, 1, 100);
+        HAL_SPI_Receive_DMA(hdm->hspi, ref->data, ref->len);
+    } else {
+        // TODO: this blocks, uses CPU - BAD
+        // Dummy read to flush FIFO
+        uint8_t dummy;
+        HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
+        uint8_t cmd = DM9051_MRCMD;
+        HAL_SPI_Transmit(hdm->hspi, &cmd, 1, 100);
+        for(uint16_t i = 0; i < rxlen; i++) {
+            HAL_SPI_Receive(hdm->hspi, &dummy, 1, 100);
+        }
+        HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
+        DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
+    }
 }
 
+// IRQ on end of transfer of Ethernet packet payload over SPI1 using DMA.
 void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
+    hdm->rx_dma_ready = true;
+
     // 1. Deassert CS
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
     
-    // 2. Clear MRCMD
-    DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
+    // 2. Clear MRCMD and Packet Received Interrupt
+    DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01); // ISR_STOP_MRCMD (bit 7) | ISR_PRS (bit 0)
     
-    // Packet is now in hdm->rx_buf[1] through hdm->rx_buf[rxlen]
+    if (hdm->lan_rx_queue) {
+        ElasticQueue_Commit(hdm->lan_rx_queue, ref);
+    }
+    ref = NULL;
 }

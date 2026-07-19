@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include "usb_fs.h"
 #include "dm9051.h"
+#include "log.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -109,8 +110,12 @@ DMA_HandleTypeDef hdma_memtomem_dma1_stream3;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream4;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream5;
 /* USER CODE BEGIN PV */
-DM9051_HandleTypeDef hdm9051;
+DM9051_HandleTypeDef hdm9051_1;
 uint8_t dm9051_mac[6] = {0x02, 0x00, 0x00, 0x11, 0x22, 0x33}; // Locally administered MAC
+
+// NULLs allowed in this array
+DM9051_HandleTypeDef* lan_dm9051_interfaces[LAN_COUNT] = { &hdm9051_1, NULL, NULL, NULL };
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -134,6 +139,13 @@ DmaMemToMem_t lan4_rx_dma_ctx_stream;
 DmaMemToMem_t* const all_dma_streams[INTERFACE_COUNT] = {
     &wan_rx_dma_ctx_stream,
     &usb_rx_dma_ctx_stream,
+    &lan1_rx_dma_ctx_stream,
+    &lan2_rx_dma_ctx_stream,
+    &lan3_rx_dma_ctx_stream,
+    &lan4_rx_dma_ctx_stream
+};
+
+DmaMemToMem_t* const lan_dma_streams[LAN_COUNT] = {
     &lan1_rx_dma_ctx_stream,
     &lan2_rx_dma_ctx_stream,
     &lan3_rx_dma_ctx_stream,
@@ -172,8 +184,6 @@ void main_loop(void) {
 		// 1) DMA RX-to-TX start. Trigger: can lock RX queue.
 		if (ElasticQueue_IsLockable(&wan_rx_queue)) {
 		    if (DmaMemToMem_IsReady(&wan_rx_dma_ctx_stream)) {
-	            // We pass it to the reporter as if it was ETH_BufferTypeDef
-	            // because their data/len fields align exactly in memory.
 	            uint8_t *out_buf;
 	            size_t out_len;
 	            if (ElasticQueue_Lock(&wan_rx_queue, 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
@@ -187,7 +197,16 @@ void main_loop(void) {
 		}
 		for (int i = 0; i < LAN_COUNT; i++) {
 			if (ElasticQueue_IsLockable(&lan_rx_queues[i])) {
-				// TODO: implement
+				if (lan_dm9051_interfaces[i] != NULL) {
+				    if (DmaMemToMem_IsReady(lan_dma_streams[i])) {
+			            uint8_t *out_buf;
+			            size_t out_len;
+			            if (ElasticQueue_Lock(&lan_rx_queues[i], 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
+			                ElasticQueue_t *dests[] = { &usb_tx_queue, &wan_tx_queue };
+			                DmaMemToMem_StartBroadcast(lan_dma_streams[i], dests, 2);
+			            }
+				    }
+				} // TODO: else try ENCJ?
 			}
 		}
 
@@ -196,7 +215,6 @@ void main_loop(void) {
 		// 2) DMA RX-to-TX continue. Trigger: DmaMemToMem_t in state DMA_STATE_TRANSFER_DONE.
 		for (int i = 0; i < INTERFACE_COUNT; i++) {
 			if (all_dma_streams[i]->state == DMA_STATE_TRANSFER_DONE) {
-    			// TODO: maybe this should be called straight from the interrupt to avoid delays?
 				DmaMemToMem_Process(all_dma_streams[i]);
 			}
 		}
@@ -205,6 +223,13 @@ void main_loop(void) {
 
 		// 3) HW to RX. Trigger: flag set by HW IRQ, implementation may vary for HW.
 		WAN_TriggerPacketRead();
+
+		for (int i = 0; i < LAN_COUNT; i++) {
+    		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
+		    if (lan_dm9051 && lan_dm9051->rx_packet_ready && lan_dm9051->rx_dma_ready) {
+                DM9051_ReadPacket_DMA_Start(lan_dm9051);
+		    }
+		}
 
         /*// 4) Check for MAC/DMA silent death and recover
         if (heth.gState == HAL_ETH_STATE_ERROR) {
@@ -290,11 +315,6 @@ int main(void)
   MX_ETH_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  hdm9051.hspi = &hspi1;
-  hdm9051.cs_port = GPIOA;
-  hdm9051.cs_pin = GPIO_PIN_4;
-  DM9051_Init(&hdm9051, dm9051_mac);
-
   // Initialize all Elastic Queues
   ElasticQueue_Init(&wan_rx_queue, wan_rx_area, QUEUE_WAN_USB_SIZE, wan_rx_refs, QUEUE_WAN_USB_MAX_REFS);
   ElasticQueue_Init(&wan_tx_queue, wan_tx_area, QUEUE_WAN_USB_SIZE, wan_tx_refs, QUEUE_WAN_USB_MAX_REFS);
@@ -302,10 +322,19 @@ int main(void)
   ElasticQueue_Init(&usb_rx_queue, usb_rx_area, QUEUE_WAN_USB_SIZE, usb_rx_refs, QUEUE_WAN_USB_MAX_REFS);
   ElasticQueue_Init(&usb_tx_queue, usb_tx_area, QUEUE_WAN_USB_SIZE, usb_tx_refs, QUEUE_WAN_USB_MAX_REFS);
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < LAN_COUNT; i++) {
       ElasticQueue_Init(&lan_rx_queues[i], lan_rx_areas[i], QUEUE_LAN_SIZE, lan_rx_refs[i], QUEUE_LAN_MAX_REFS);
       ElasticQueue_Init(&lan_tx_queues[i], lan_tx_areas[i], QUEUE_LAN_SIZE, lan_tx_refs[i], QUEUE_LAN_MAX_REFS);
   }
+
+  hdm9051_1.hspi = &hspi1;
+  hdm9051_1.hdma_rx = &hdma_spi1_rx;
+  hdm9051_1.hdma_tx = &hdma_spi1_tx;
+  hdm9051_1.cs_port = GPIOA;
+  hdm9051_1.cs_pin = GPIO_PIN_4;
+  hdm9051_1.lan_rx_queue = &lan_rx_queues[0]; // Assuming DM9051 maps to LAN Port 1
+  hdm9051_1.lan_tx_queue = &lan_tx_queues[0];
+  DM9051_Init(&hdm9051_1, dm9051_mac);
 
   // Initialize DMA Wrappers
   DmaMemToMem_Init(&wan_rx_dma_ctx_stream, &hdma_memtomem_dma1_stream0, &wan_rx_queue);
@@ -709,6 +738,38 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if(GPIO_Pin == GPIO_PIN_3) { // PA3 is DM9051_1 INT
+        hdm9051_1.rx_packet_ready = 1;
+        //Log_Printf("DM9051 EXTI\r\n");
+    }
+}
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi->Instance == SPI1) {
+        DM9051_TxCpltCallback(&hdm9051_1);
+        //Log_Printf("DM9051 TX Cplt\r\n");
+    }
+}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi->Instance == SPI1) {
+        DM9051_RxCpltCallback(&hdm9051_1);
+        //Log_Printf("DM9051 RX Cplt\r\n");
+    }
+}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi->Instance == SPI1) {
+        DM9051_RxCpltCallback(&hdm9051_1);
+        //Log_Printf("DM9051 TXRX Cplt\r\n");
+    }
+}
 
 /* USER CODE END 4 */
 
