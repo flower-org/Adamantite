@@ -110,6 +110,8 @@ DMA_HandleTypeDef hdma_memtomem_dma1_stream3;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream4;
 DMA_HandleTypeDef hdma_memtomem_dma1_stream5;
 /* USER CODE BEGIN PV */
+uint8_t global_dma_trash_buffer[ETH_RX_BUFFER_SIZE];
+
 DM9051_HandleTypeDef hdm9051_1;
 uint8_t dm9051_mac[6] = {0x02, 0x00, 0x00, 0x11, 0x22, 0x33}; // Locally administered MAC
 

@@ -4,7 +4,6 @@
 #include "stm32h7xx_hal.h"
 #include <stdint.h>
 
-#define ETH_RX_BUFFER_SIZE 1536U
 #define DEMO_ETH_MAC_ADDR_LEN 6U
 #define DEMO_ETH_HEADER_LEN 14U
 #define DEMO_ETH_SOURCE_MAC_OFFSET DEMO_ETH_MAC_ADDR_LEN
