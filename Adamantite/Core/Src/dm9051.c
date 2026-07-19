@@ -15,8 +15,9 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg);
 // Write to MAC Register
 static void DM9051_WriteReg(DM9051_HandleTypeDef *hdm, uint8_t reg, uint8_t val) {
     uint8_t spi_tx[2] = {0x80 | reg, val};
+    uint8_t spi_rx[2] = {0};
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit(hdm->hspi, spi_tx, 2, 10);
+    HAL_SPI_TransmitReceive(hdm->hspi, spi_tx, spi_rx, 2, 10);
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
 }
 
@@ -99,7 +100,7 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm, uint8_t *data, uint16_t l
 
     // 3. Start SPI DMA
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit_DMA(hdm->hspi, hdm->tx_buf, len + 1);
+    HAL_SPI_TransmitReceive_DMA(hdm->hspi, hdm->tx_buf, global_dma_trash_buffer, len + 1);
     */
 }
 
@@ -185,23 +186,29 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         hdm->rx_dma_ready = false;
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
-        HAL_SPI_Transmit(hdm->hspi, &cmd, 1, 10);
-        HAL_SPI_Receive_DMA(hdm->hspi, hdm->current_rx_packet->data, hdm->current_rx_packet->len);
+        uint8_t cmd_rx;
+        HAL_SPI_TransmitReceive(hdm->hspi, &cmd, &cmd_rx, 1, 10);
+        HAL_SPI_TransmitReceive_DMA(hdm->hspi, global_dma_trash_buffer, hdm->current_rx_packet->data, hdm->current_rx_packet->len);
+        //Log_Printf("HAL_SPI_TransmitReceive_DMA! %d (NORMAL)\r\n", ++start_count);
     } else {
         // Drop packet using DMA to a global trash buffer to save CPU cycles
         hdm->rx_dma_ready = false;
         
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
-        HAL_SPI_Transmit(hdm->hspi, &cmd, 1, 10);
+        uint8_t cmd_rx;
+        HAL_SPI_TransmitReceive(hdm->hspi, &cmd, &cmd_rx, 1, 10);
         
         // Start DMA transfer into the global trash buffer
-        HAL_SPI_Receive_DMA(hdm->hspi, global_dma_trash_buffer, rxlen);
+        HAL_SPI_TransmitReceive_DMA(hdm->hspi, global_dma_trash_buffer, global_dma_trash_buffer, rxlen);
+        //Log_Printf("HAL_SPI_TransmitReceive_DMA! %d (DROP)\r\n", ++start_count);
     }
 }
 
 // IRQ on end of transfer of Ethernet packet payload over SPI1 using DMA.
 void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
+    //Log_Printf("DM9051_RxCpltCallback! %d (FREE)\r\n", ++end_count);
+
     hdm->rx_dma_ready = true;
 
     // 1. Deassert CS
