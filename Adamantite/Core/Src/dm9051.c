@@ -36,6 +36,7 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 {
   hdm->dma_ready = true;
+  hdm->mac_tx_slots = 2; // DM9051 has 2 internal TX SRAM slots
 
   // 1. GPCR: GEP Output
   DM9051_WriteReg(hdm, DM9051_GPCR, 0x01);
@@ -74,8 +75,9 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
   DM9051_WriteReg(hdm, DM9051_ISR, 0xFF);
 
   // 9. Enable interrupts in IMR (Register 0xFF)
-  // 0x80 (SRAM pointer auto-return) | 0x01 (Packet Received) = 0x81
-  DM9051_WriteReg(hdm, DM9051_IMR, 0x81);
+  DM9051_WriteReg(hdm, DM9051_IMR, DM9051_IMR_PAR | DM9051_IMR_PTM | DM9051_IMR_PRM | 
+                                   DM9051_IMR_LNKCHGM | DM9051_IMR_ROM | 
+                                   DM9051_IMR_ROOM | DM9051_IMR_UDRUNM);
 
   // 10. Enable Receiver in RCR (Register 0x05)
   DM9051_WriteReg(hdm, DM9051_RCR, DM9051_RCR_DIS_LONG | DM9051_RCR_DIS_CRC | 
@@ -86,7 +88,7 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 // ================================ WRITE ================================
 
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
-    if (!hdm->dma_ready) {
+    if (!hdm->dma_ready || hdm->mac_tx_slots == 0) {
         return;
     }
 
@@ -96,9 +98,7 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
         return;
     }
 
-    // 1. Wait for NSR TX ready (TX1END or TX2END)
-    // In a real application, you'd want a non-blocking timeout or interrupt driven approach
-    if (!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)) return;
+    hdm->mac_tx_slots--;
     
     // 2. Prepare the DMA buffer by sending MWCMD first
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
@@ -130,6 +130,72 @@ void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
     }
 }
 
+// ================================ INTERRUPT ================================
+
+void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
+    if (!hdm->interrupt_pending || !hdm->dma_ready) {
+        return;
+    }
+
+    uint8_t isr = DM9051_ReadReg(hdm, DM9051_ISR);
+    // clear all except packet_received_flag
+    uint8_t clear_isr = 0;
+
+    // Interrupt flags
+    bool packet_received_flag = isr & DM9051_ISR_PRS;
+    bool packet_transmitted_flag = isr & DM9051_ISR_PTS;
+    bool link_status_changed_flag = isr & DM9051_ISR_LNKCHG;
+    bool receive_overflow_flag = isr & DM9051_ISR_ROS;
+    bool overflow_counter_overflow_flag = isr & DM9051_ISR_ROOS;
+    bool transmit_under_run_flag = isr & DM9051_ISR_UDRUN;
+
+    // Link Status Change
+    if (link_status_changed_flag) {
+        Log_Printf("DM9051 Link Status Changed\r\n");
+        clear_isr |= DM9051_ISR_LNKCHG;
+    }
+
+    // Receive Overflow
+    if (receive_overflow_flag) {
+        Log_Printf("DM9051 Receive Overflow!\r\n");
+        clear_isr |= DM9051_ISR_ROS;
+    }
+
+    // Receive Overflow Counter Overflow
+    if (overflow_counter_overflow_flag) {
+        Log_Printf("DM9051 Receive Overflow Counter Overflow!\r\n");
+        clear_isr |= DM9051_ISR_ROOS;
+    }
+
+    // Transmit Under-run
+    if (transmit_under_run_flag) {
+        Log_Printf("DM9051 Transmit Under-run!\r\n");
+        clear_isr |= DM9051_ISR_UDRUN;
+    }
+
+    // Packet Transmitted
+    if (packet_transmitted_flag) {
+        Log_Printf("DM9051 Packet Transmitted\r\n");
+        if (hdm->mac_tx_slots < 2) {
+            hdm->mac_tx_slots++;
+        }
+        clear_isr |= DM9051_ISR_PTS;
+    }
+
+    // clear all except packet_received_flag
+    if (clear_isr) {
+        DM9051_WriteReg(hdm, DM9051_ISR, clear_isr);
+    }
+
+    // Packet Received (starts DMA, so we must clear other ISR flags BEFORE this)
+    if (packet_received_flag) {
+        Log_Printf("DM9051 Packet Received\r\n");
+        DM9051_ReadPacket_DMA_Start(hdm);
+    } else {
+        hdm->interrupt_pending = 0;
+    }
+}
+
 // ================================ READ ================================
 
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
@@ -137,7 +203,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         return;
     }
 
-    hdm->rx_packet_ready = 0;
+    hdm->interrupt_pending = 0;
 
     // 1. Poll MRCMDX (0x70) to see if packet is ready
     // We only need 2 bytes: 1 for the command, 1 to read the "Ready" byte.
@@ -152,22 +218,22 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     
     if (ready != 0x01 && ready != 0x00) {
         // Error state, need to reset FIFO
-        DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
+        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE); // ISR_STOP_MRCMD
         
         // We should actually reset the pointer or MAC here if it's permanently stuck!
         // But for now, just clear the interrupt so it doesn't lock up.
-        DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01);
+        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS);
         
         return;
     }
     if (ready == 0x00) {
         // Empty
-        DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01); // Clear INT anyway
+        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // Clear INT anyway
         return; // No packet
     }
 
     // 2. Read Rx Header (4 bytes) using MRCMD (0x72)
-    hdm->rx_packet_ready = 1;
+    hdm->interrupt_pending = 1;
 
     uint8_t rx_hdr_tx[5] = {DM9051_MRCMD, 0, 0, 0, 0};
     uint8_t rx_hdr_rx[5] = {0};
@@ -177,7 +243,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
     
     // Stop memory read for now to process header
-    DM9051_WriteReg(hdm, DM9051_ISR, 0x80); // ISR_STOP_MRCMD
+    DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE); // ISR_STOP_MRCMD
     
     // rx_hdr_rx[1]=Ready Byte, rx_hdr_rx[2]=Status, rx_hdr_rx[3]=LenL, rx_hdr_rx[4]=LenH
     uint16_t rxlen = rx_hdr_rx[3] | (rx_hdr_rx[4] << 8);
@@ -226,7 +292,7 @@ void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
     
     // 2. Clear MRCMD and Packet Received Interrupt
-    DM9051_WriteReg(hdm, DM9051_ISR, 0x80 | 0x01); // ISR_STOP_MRCMD (bit 7) | ISR_PRS (bit 0)
+    DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // ISR_STOP_MRCMD | ISR_PRS
     
     if (hdm->lan_rx_queue && hdm->current_rx_packet) {
         ElasticQueue_Commit(hdm->lan_rx_queue, hdm->current_rx_packet);

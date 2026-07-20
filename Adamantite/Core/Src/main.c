@@ -228,8 +228,8 @@ void main_loop(void) {
 
 		for (int i = 0; i < LAN_COUNT; i++) {
     		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
-		    if (lan_dm9051 && lan_dm9051->rx_packet_ready && lan_dm9051->dma_ready) {
-                DM9051_ReadPacket_DMA_Start(lan_dm9051);
+		    if (lan_dm9051 && lan_dm9051->interrupt_pending && lan_dm9051->dma_ready) {
+                DM9051_ProcessInterrupt(lan_dm9051);
 		    }
 		}
 
@@ -747,7 +747,7 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(GPIO_Pin == GPIO_PIN_3) { // PA3 is DM9051_1 INT
-        hdm9051_1.rx_packet_ready = 1;
+        hdm9051_1.interrupt_pending = 1;
         //Log_Printf("DM9051 EXTI\r\n");
     }
 }

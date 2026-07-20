@@ -38,6 +38,24 @@
 #define DM9051_RCR_WTDIS     0x40 // Watchdog Timer Disable
 #define DM9051_RCR_HASH_ALL  0x80 // Hash All
 
+// DM9051 Interrupt Status Register (ISR) Flags
+#define DM9051_ISR_PRS       0x01 // Packet Received Status
+#define DM9051_ISR_PTS       0x02 // Packet Transmitted Status
+#define DM9051_ISR_ROS       0x04 // Receive Overflow Status
+#define DM9051_ISR_ROOS      0x08 // Receive Overflow Counter Overflow
+#define DM9051_ISR_LNKCHG    0x20 // Link Status Change
+#define DM9051_ISR_UDRUN     0x40 // Transmit Under Run
+#define DM9051_ISR_IOMODE    0x80 // I/O Mode (or Stop MRCMD)
+
+// DM9051 Interrupt Mask Register (IMR) Flags
+#define DM9051_IMR_PRM       0x01 // Packet Received Mask
+#define DM9051_IMR_PTM       0x02 // Packet Transmitted Mask
+#define DM9051_IMR_ROM       0x04 // Receive Overflow Mask
+#define DM9051_IMR_ROOM      0x08 // Receive Overflow Counter Mask
+#define DM9051_IMR_LNKCHGM   0x20 // Link Status Change Mask
+#define DM9051_IMR_UDRUNM    0x40 // Transmit Under Run Mask
+#define DM9051_IMR_PAR       0x80 // Pointer Auto Return
+
 typedef struct {
     SPI_HandleTypeDef* hspi;
     DMA_HandleTypeDef* hdma_rx;
@@ -51,7 +69,8 @@ typedef struct {
 
     ElasticQueueRef_t* current_rx_packet;
 
-    bool rx_packet_ready;
+    bool interrupt_pending;
+    uint8_t mac_tx_slots;
 
     // On STM32 SPI we have 2 physical SPI DMA channels and we can use both RX and TX simultaneously.
     // However DM9051 doesn't support that, so we have to alternate.
@@ -65,6 +84,7 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr);
 
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm);
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm);
+void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm);
 
 // To be called from HAL_SPI_TxCpltCallback
 void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm);
