@@ -110,18 +110,15 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
 
     // 3. Start SPI DMA for the payload
     hdm->dma_status = DM9051_DMA_TX;
+    Log_Printf("DM9051 Transmit\r\n");
     HAL_SPI_TransmitReceive_DMA(hdm->hspi, data, global_dma_trash_buffer, len);
 }
 
 // ================================ INTERRUPT ================================
 
 void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
-    if (!hdm->interrupt_pending || hdm->dma_status != DM9051_DMA_READY) {
-        return;
-    }
-
     uint8_t isr = DM9051_ReadReg(hdm, DM9051_ISR);
-    // clear all except packet_received_flag
+
     uint8_t clear_isr = 0;
 
     // Interrupt flags
@@ -159,23 +156,25 @@ void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
     // Packet Transmitted
     if (packet_transmitted_flag) {
         Log_Printf("DM9051 Packet Transmitted\r\n");
+        clear_isr |= DM9051_ISR_PTS;
+
         if (hdm->mac_tx_slots < 2) {
             hdm->mac_tx_slots++;
         }
-        clear_isr |= DM9051_ISR_PTS;
-    }
-
-    // clear all except packet_received_flag
-    if (clear_isr) {
-        DM9051_WriteReg(hdm, DM9051_ISR, clear_isr);
     }
 
     // Packet Received (starts DMA, so we must clear other ISR flags BEFORE this)
     if (packet_received_flag) {
-        Log_Printf("DM9051 Packet Received\r\n");
-        DM9051_ReadPacket_DMA_Start(hdm);
-    } else {
-        hdm->interrupt_pending = 0;
+    	Log_Printf("DM9051 Packet Received\r\n");
+    	// don't clear PRS here, or else DM9051_MRCMDX in DM9051_ReadPacket_DMA_Start will return {0,0,0}
+        //clear_isr |= DM9051_ISR_PRS;
+
+        hdm->can_read_packet = true;
+    }
+
+    // clear interrupt
+    if (clear_isr) {
+        DM9051_WriteReg(hdm, DM9051_ISR, clear_isr);
     }
 }
 
@@ -186,7 +185,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         return;
     }
 
-    hdm->interrupt_pending = 0;
+    hdm->can_read_packet = 0;
 
     // 1. Poll MRCMDX (0x70) to see if packet is ready
     // We only need 2 bytes: 1 for the command, 1 to read the "Ready" byte.
@@ -211,12 +210,13 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     }
     if (ready == 0x00) {
         // Empty
+    	// TODO: do we need to clear here?
         DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // Clear INT anyway
         return; // No packet
     }
 
     // 2. Read Rx Header (4 bytes) using MRCMD (0x72)
-    hdm->interrupt_pending = 1;
+    hdm->can_read_packet = 1;
 
     uint8_t rx_hdr_tx[5] = {DM9051_MRCMD, 0, 0, 0, 0};
     uint8_t rx_hdr_rx[5] = {0};

@@ -73,7 +73,7 @@ typedef struct {
 
     ElasticQueueRef_t* current_rx_packet;
 
-    bool interrupt_pending;
+    bool can_read_packet;
     uint8_t mac_tx_slots;
 
     // On STM32 SPI we have 2 physical SPI DMA channels and we can use both RX and TX simultaneously.

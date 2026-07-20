@@ -204,8 +204,8 @@ void main_loop(void) {
 			            uint8_t *out_buf;
 			            size_t out_len;
 			            if (ElasticQueue_Lock(&lan_rx_queues[i], 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
-			                ElasticQueue_t *dests[] = { &usb_tx_queue/*, &wan_tx_queue*/ };
-			                DmaMemToMem_StartBroadcast(lan_dma_streams[i], dests, 1/*2*/);
+			                ElasticQueue_t *dests[] = { &usb_tx_queue, &wan_tx_queue };
+			                DmaMemToMem_StartBroadcast(lan_dma_streams[i], dests, 2);
 			            }
 				    }
 				} // TODO: else try ENCJ?
@@ -228,8 +228,8 @@ void main_loop(void) {
 
 		for (int i = 0; i < LAN_COUNT; i++) {
     		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
-		    if (lan_dm9051 && lan_dm9051->interrupt_pending && lan_dm9051->dma_status == DM9051_DMA_READY) {
-                DM9051_ProcessInterrupt(lan_dm9051);
+		    if (lan_dm9051 && lan_dm9051->can_read_packet && lan_dm9051->dma_status == DM9051_DMA_READY) {
+		    	DM9051_ReadPacket_DMA_Start(lan_dm9051);
 		    }
 		}
 
@@ -747,7 +747,7 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(GPIO_Pin == GPIO_PIN_3) { // PA3 is DM9051_1 INT
-        hdm9051_1.interrupt_pending = 1;
+    	DM9051_ProcessInterrupt(&hdm9051_1);
         //Log_Printf("DM9051 EXTI\r\n");
     }
 }
