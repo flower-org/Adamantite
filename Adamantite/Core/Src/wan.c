@@ -1,10 +1,14 @@
 #include "wan.h"
+#include "log.h"
 #include "usb_fs.h"
 #include "main.h"
 #include <string.h>
 #include "elastic_queue.h"
 
 extern ElasticQueue_t wan_rx_queue;
+extern ElasticQueue_t wan_tx_queue;
+
+volatile bool wan_tx_busy = false;
 
 static uint8_t demo_eth_tx_frame[DEMO_ETH_HEADER_LEN + DEMO_ETH_MAX_PAYLOAD_LEN];
 static const uint8_t demo_tx_payload[] = {'a', 'd', 'a', 'm', 'a', 'n', 't', 'i', 't', 'e', '-', 'd', 'e', 'm', 'o'};
@@ -51,8 +55,10 @@ void HAL_ETH_RxLinkCallback(void **pStart, void **pEnd, uint8_t *buff, uint16_t 
 
 void HAL_ETH_TxCpltCallback(ETH_HandleTypeDef *heth_ptr)
 {
+	HAL_ETH_ReleaseTxPacket(heth_ptr);
     g_eth_tx_done++;
-    // TODO: need to call Done on a buffer here
+    wan_tx_busy = false;
+    ElasticQueue_Done(&wan_tx_queue);
 }
 
 const char *Demo_EtherTypeName(uint16_t ether_type)
@@ -126,6 +132,25 @@ static void Demo_TrySendFrameFromRx(const ETH_BufferTypeDef *rx_packet)
 }
 
 // We need to call HAL_ETH_ReadData because it triggers HAL_ETH_RxLinkCallback
+int WAN_TransmitPacket(uint8_t *buf, size_t len)
+{
+    static ETH_BufferTypeDef tx_buffer;
+    tx_buffer.buffer = buf;
+    tx_buffer.len = len;
+    tx_buffer.next = NULL;
+
+    TxConfig.Length = len;
+    TxConfig.TxBuffer = &tx_buffer;
+
+    wan_tx_busy = true;
+    if (HAL_ETH_Transmit_IT(&heth, &TxConfig) == HAL_OK) {
+        Log_Printf("WAN_TransmitPacket\r\n");
+        return 0; // Success
+    }
+    wan_tx_busy = false;
+    return -1; // Busy or error
+}
+
 void WAN_TriggerPacketRead(void)
 {
   if (!ElasticQueue_IsFull(&wan_rx_queue, ETH_BUFFER_SIZE)) {

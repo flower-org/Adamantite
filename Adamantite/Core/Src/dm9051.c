@@ -36,7 +36,8 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 {
   hdm->dma_status = DM9051_DMA_READY;
-  hdm->mac_tx_slots = 2; // DM9051 has 2 internal TX SRAM slots
+  //hdm->can_write_packet = true;
+  Log_Printf("init hdm->can_write_packet = true;\r\n");
 
   // 1. GPCR: GEP Output
   DM9051_WriteReg(hdm, DM9051_GPCR, 0x01);
@@ -88,9 +89,14 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 // ================================ WRITE ================================
 
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
-    if (hdm->dma_status != DM9051_DMA_READY || hdm->mac_tx_slots == 0) {
-        return;
-    }
+    if (hdm->dma_status != DM9051_DMA_READY) { return; }
+    //if (!hdm->can_write_packet) {
+    	// we need this crutch since INT is not always called correctly
+        if (!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)) {
+        	return;
+        }
+        //hdm->can_write_packet = true;
+    //}
 
     uint8_t *data;
     size_t len;
@@ -100,7 +106,8 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
 
     // if (!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)) return;
 
-    hdm->mac_tx_slots--;
+    //hdm->can_write_packet = false;
+    Log_Printf("111 hdm->can_write_packet = false;\r\n");
     
     // 2. Prepare the DMA buffer by sending MWCMD first
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
@@ -117,7 +124,8 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
 // ================================ INTERRUPT ================================
 
 void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
-    uint8_t isr = DM9051_ReadReg(hdm, DM9051_ISR);
+	return;
+    /*uint8_t isr = DM9051_ReadReg(hdm, DM9051_ISR);
 
     uint8_t clear_isr = 0;
 
@@ -158,8 +166,12 @@ void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
         Log_Printf("DM9051 Packet Transmitted\r\n");
         clear_isr |= DM9051_ISR_PTS;
 
-        if (hdm->mac_tx_slots < 2) {
-            hdm->mac_tx_slots++;
+        if (!hdm->can_write_packet) {
+            hdm->can_write_packet = true;
+            Log_Printf("222 hdm->can_write_packet = true;\r\n");
+        } else {
+            hdm->can_write_packet = true;
+            Log_Printf("333 CAN NO DO hdm->can_write_packet = true;\r\n");
         }
     }
 
@@ -169,54 +181,51 @@ void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
     	// don't clear PRS here, or else DM9051_MRCMDX in DM9051_ReadPacket_DMA_Start will return {0,0,0}
         //clear_isr |= DM9051_ISR_PRS;
 
-        hdm->can_read_packet = true;
+        //hdm->can_read_packet = true;
     }
 
     // clear interrupt
     if (clear_isr) {
         DM9051_WriteReg(hdm, DM9051_ISR, clear_isr);
-    }
+    }*/
 }
 
 // ================================ READ ================================
 
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
-    if (hdm->dma_status != DM9051_DMA_READY) {
-        return;
-    }
+    if (hdm->dma_status != DM9051_DMA_READY) { return; }
+    //if (!hdm->can_read_packet) {
+        // 1. Poll MRCMDX (0x70) to see if packet is ready
+        // We only need 2 bytes: 1 for the command, 1 to read the "Ready" byte.
+        uint8_t mrcmdx_tx[3] = {DM9051_MRCMDX, 0, 0};
+        uint8_t mrcmdx_rx[3] = {0};
 
-    hdm->can_read_packet = 0;
+        HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
+        HAL_SPI_TransmitReceive(hdm->hspi, mrcmdx_tx, mrcmdx_rx, 3, 10);
+        HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
 
-    // 1. Poll MRCMDX (0x70) to see if packet is ready
-    // We only need 2 bytes: 1 for the command, 1 to read the "Ready" byte.
-    uint8_t mrcmdx_tx[3] = {DM9051_MRCMDX, 0, 0};
-    uint8_t mrcmdx_rx[3] = {0};
-    
-    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(hdm->hspi, mrcmdx_tx, mrcmdx_rx, 3, 10);
-    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
-
-    uint8_t ready = mrcmdx_rx[2]; // The first byte after the command is the Ready byte
-    
-    if (ready != 0x01 && ready != 0x00) {
-        // Error state, need to reset FIFO
-        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE); // ISR_STOP_MRCMD
+        uint8_t ready = mrcmdx_rx[2]; // The first byte after the command is the Ready byte
         
-        // We should actually reset the pointer or MAC here if it's permanently stuck!
-        // But for now, just clear the interrupt so it doesn't lock up.
-        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS);
-        
-        return;
-    }
-    if (ready == 0x00) {
-        // Empty
-    	// TODO: do we need to clear here?
-        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // Clear INT anyway
-        return; // No packet
-    }
+        if (ready != 0x01 && ready != 0x00) {
+            // Error state, need to reset FIFO
+            DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE); // ISR_STOP_MRCMD
+
+            // We should actually reset the pointer or MAC here if it's permanently stuck!
+            // But for now, just clear the interrupt so it doesn't lock up.
+            DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS);
+
+            return;
+        }
+        if (ready == 0x00) {
+            // Empty
+        	// TODO: do we need to clear here?
+            DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // Clear INT anyway
+            return; // No packet
+        }
+    //}
 
     // 2. Read Rx Header (4 bytes) using MRCMD (0x72)
-    hdm->can_read_packet = 1;
+    //hdm->can_read_packet = 0;
 
     uint8_t rx_hdr_tx[5] = {DM9051_MRCMD, 0, 0, 0, 0};
     uint8_t rx_hdr_rx[5] = {0};

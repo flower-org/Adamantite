@@ -118,6 +118,14 @@ uint8_t dm9051_mac[6] = {0x02, 0x00, 0x00, 0x11, 0x22, 0x33}; // Locally adminis
 // NULLs allowed in this array
 DM9051_HandleTypeDef* lan_dm9051_interfaces[LAN_COUNT] = { &hdm9051_1, NULL, NULL, NULL };
 
+// Buffer for WAN send test
+uint8_t wan_test_frame[64] = {
+    0xE8, 0x6A, 0x64, 0x89, 0x09, 0x2D, // Destination MAC: e8:6A:64:89:09:2D
+    0x02, 0x00, 0x00, 0x11, 0x22, 0x33, // Source MAC (dummy)
+    0x08, 0x00,                         // EtherType: IPv4
+    'W', 'A', 'N', ' ', 'T', 'E', 'S', 'T' // Payload (remaining bytes will be zero-initialized)
+};
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -179,10 +187,47 @@ void LED_Init(void)
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 }
 
+static uint8_t g_eth_tx_frame[60] __attribute__((aligned(32)));
+
+void send_raw_frame(void)
+{
+    ETH_BufferTypeDef txBuffer = {0};
+
+    txBuffer.buffer = wan_test_frame;
+    txBuffer.len = sizeof(wan_test_frame);
+    txBuffer.next = NULL;
+
+    TxConfig.TxBuffer = &txBuffer;
+    TxConfig.Length = sizeof(wan_test_frame);
+
+#if (__DCACHE_PRESENT == 1U)
+    SCB_CleanDCache_by_Addr((uint32_t *)wan_test_frame, 64);
+#endif
+
+    if (HAL_ETH_Transmit(&heth, &TxConfig, 1000) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+void test_add_to_transmit_queue(void)
+{
+	ElasticQueue_t *q = &wan_tx_queue;
+//	ElasticQueue_t *q = &lan_tx_queues[0];
+	ElasticQueueRef_t* test_ref = ElasticQueue_Allocate(q, 64);
+	if (test_ref) {
+		memcpy(test_ref->data, wan_test_frame, sizeof(wan_test_frame));
+		test_ref->len = sizeof(wan_test_frame);
+		ElasticQueue_Commit(q, test_ref);
+	}
+}
+
+
 void main_loop(void) {
 	/* Infinite loop */
 	while (1)
 	{
+		// test_add_to_transmit_queue();
+
 		// 1) DMA RX-to-TX start. Trigger: can lock RX queue.
 		if (ElasticQueue_IsLockable(&wan_rx_queue)) {
 		    if (DmaMemToMem_IsReady(&wan_rx_dma_ctx_stream)) {
@@ -228,16 +273,16 @@ void main_loop(void) {
 
 		for (int i = 0; i < LAN_COUNT; i++) {
     		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
-		    if (lan_dm9051 && lan_dm9051->can_read_packet && lan_dm9051->dma_status == DM9051_DMA_READY) {
+		    if (lan_dm9051 && lan_dm9051->dma_status == DM9051_DMA_READY) {
 		    	DM9051_ReadPacket_DMA_Start(lan_dm9051);
 		    }
 		}
 
         /*// 4) Check for MAC/DMA silent death and recover
         if (heth.gState == HAL_ETH_STATE_ERROR) {
-            Log_Printf("ETH DEAD! err=0x%lx dma=0x%lx\r\n", 
+            Log_Printf("ETH DEAD! err=0x%lx dma=0x%lx\r\n",
                        (unsigned long)heth.ErrorCode, (unsigned long)heth.DMAErrorCode);
-                       
+
             // Try to force restart
             HAL_ETH_Stop(&heth);
             HAL_ETH_Start_IT(&heth);
@@ -253,13 +298,13 @@ void main_loop(void) {
 		// ----------------------------------------------------------
 
 		// 4) TX to HW. Trigger: can lock TX queue, implementation may vary for HW.
-		if (ElasticQueue_IsLockable(&wan_tx_queue)) {
-			// TODO: implement
+		if (!wan_tx_busy && ElasticQueue_IsLockable(&wan_tx_queue)) {
             uint8_t *out_buf;
             size_t out_len;
             if (ElasticQueue_Lock(&wan_tx_queue, 1, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
-                // Drops packet
-                ElasticQueue_Abort(&wan_tx_queue);
+                if (WAN_TransmitPacket(out_buf, out_len) != 0) {
+                    ElasticQueue_Abort(&wan_tx_queue);
+                }
             }
 		}
 		if (ElasticQueue_IsLockable(&usb_tx_queue)) {
@@ -482,12 +527,16 @@ static void MX_ETH_Init(void)
     Error_Handler();
   }
 
-  memset(&TxConfig, 0 , sizeof(ETH_TxPacketConfig));
-  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
-  TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
-  TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
-  /* USER CODE BEGIN ETH_Init 2 */
+  memset(&TxConfig, 0, sizeof(ETH_TxPacketConfig));
+  TxConfig.Attributes   = ETH_TX_PACKETS_FEATURES_CRCPAD;
+  TxConfig.ChecksumCtrl = ETH_CHECKSUM_DISABLE;
+  TxConfig.CRCPadCtrl   = ETH_CRC_PAD_INSERT;
 
+  ETH_MACConfigTypeDef macConfig;
+  HAL_ETH_GetMACConfig(&heth, &macConfig);
+  macConfig.AutomaticPadCRCStrip = DISABLE;
+  macConfig.CRCStripTypePacket = DISABLE;
+  HAL_ETH_SetMACConfig(&heth, &macConfig);
   /* USER CODE END ETH_Init 2 */
 
 }
@@ -756,7 +805,7 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi->Instance == SPI1) {
         //Log_Printf("SPI Error! ErrorCode: 0x%08lX\r\n", hspi->ErrorCode);
-        
+
         // If it is a DMA-related error (bit 4 set)
         //if (hspi->ErrorCode & 0x00000010UL) { // HAL_SPI_ERROR_DMA
             if (hspi->hdmatx != NULL && hspi->hdmatx->ErrorCode != 0) {

@@ -73,8 +73,8 @@ typedef struct {
 
     ElasticQueueRef_t* current_rx_packet;
 
-    bool can_read_packet;
-    uint8_t mac_tx_slots;
+    /*volatile bool can_read_packet;
+    volatile bool can_write_packet;*/
 
     // On STM32 SPI we have 2 physical SPI DMA channels and we can use both RX and TX simultaneously.
     // However DM9051 doesn't support that, so we have to alternate.

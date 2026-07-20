@@ -6,7 +6,7 @@
 #include <string.h>
 
 #define DEMO_USB_MESSAGE_MAX_LEN 128U
-#define USB_TX_QUEUE_SIZE 16U
+#define USB_TX_QUEUE_SIZE 128U
 #define USB_RX_QUEUE_SIZE 8U
 
 typedef struct {
@@ -110,22 +110,33 @@ extern uint64_t demo_allocated;
 
 void Demo_ReportPacket(uint8_t *frame, uint32_t frame_len, size_t active_queue_count)
 {
-  char msg[DEMO_USB_MESSAGE_MAX_LEN];
+  /*char msg[DEMO_USB_MESSAGE_MAX_LEN];
   uint16_t ether_type;
   const char *type_name;
-  
+
   if (frame_len < 14U) { return; }
-  
+
   ether_type = ((uint16_t)frame[12] << 8) | frame[13];
   type_name = Demo_EtherTypeName(ether_type);
-  
+
   int message_len = snprintf(msg, sizeof(msg),
-                         "len=%lu type=0x%04x(%s) dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x alloc=%lu/%lu q=%lu\r\n",
+                         "len=%lu type=0x%04x(%s) src=%02x:%02x:%02x:%02x:%02x:%02x dst=%02x:%02x:%02x:%02x:%02x:%02x alloc=%lu/%lu q=%lu\r\n",
                          (unsigned long)frame_len, ether_type, type_name,
-                         frame[0], frame[1], frame[2], frame[3], frame[4], frame[5],
                          frame[6], frame[7], frame[8], frame[9], frame[10], frame[11],
+                         frame[0], frame[1], frame[2], frame[3], frame[4], frame[5],
                          (unsigned long)demo_allocated, (unsigned long)demo_allocate_attempts, (unsigned long)active_queue_count);
   if (message_len > 0) {
     USB_FS_EnqueueMessage((uint8_t *)msg, (uint16_t)message_len);
   }
+
+  for (uint32_t i = 0; i < frame_len; i += 32) {
+    int offset = snprintf(msg, sizeof(msg), "%04lx: ", (unsigned long)i);
+    for (uint32_t j = 0; j < 32 && (i + j) < frame_len; j++) {
+      offset += snprintf(msg + offset, sizeof(msg) - offset, "%02X", frame[i + j]);
+    }
+    snprintf(msg + offset, sizeof(msg) - offset, "\r\n");
+    USB_FS_EnqueueMessage((uint8_t *)msg, (uint16_t)strlen(msg));
+  }
+  
+  USB_FS_EnqueueMessage((uint8_t *)"\r\n", 2);*/
 }

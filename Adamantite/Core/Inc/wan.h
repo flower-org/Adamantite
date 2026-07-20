@@ -3,6 +3,7 @@
 
 #include "stm32h7xx_hal.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #define DEMO_ETH_MAC_ADDR_LEN 6U
 #define DEMO_ETH_HEADER_LEN 14U
@@ -23,9 +24,10 @@ extern ETH_HandleTypeDef heth;
 extern ETH_TxPacketConfig TxConfig;
 extern uint64_t demo_packet_count;
 extern volatile uint32_t g_eth_tx_done;
-
+extern volatile bool wan_tx_busy;
 
 void WAN_TriggerPacketRead(void);
+int WAN_TransmitPacket(uint8_t *buf, size_t len);
 DemoLanTxStatus Demo_SendRawEthernetFrame(const uint8_t destination_mac[6],
                                           uint16_t ether_type,
                                           const uint8_t *payload,

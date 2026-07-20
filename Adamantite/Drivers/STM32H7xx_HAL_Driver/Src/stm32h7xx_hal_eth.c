@@ -177,6 +177,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32h7xx_hal.h"
+#include "log.h"
 
 /** @addtogroup STM32H7xx_HAL_Driver
   * @{
@@ -1151,6 +1152,8 @@ HAL_StatusTypeDef HAL_ETH_ReadData(ETH_HandleTypeDef *heth, void **pAppBuff)
     *pAppBuff = heth->RxDescList.pRxStart;
     /* Reset first element */
     heth->RxDescList.pRxStart = NULL;
+
+    Log_Printf("WAN Packet Received\r\n");
 
     return HAL_OK;
   }
