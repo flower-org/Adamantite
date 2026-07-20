@@ -204,8 +204,8 @@ void main_loop(void) {
 			            uint8_t *out_buf;
 			            size_t out_len;
 			            if (ElasticQueue_Lock(&lan_rx_queues[i], 2, &out_buf, &out_len) == ELASTIC_QUEUE_OK) {
-			                ElasticQueue_t *dests[] = { &usb_tx_queue, &wan_tx_queue };
-			                DmaMemToMem_StartBroadcast(lan_dma_streams[i], dests, 2);
+			                ElasticQueue_t *dests[] = { &usb_tx_queue/*, &wan_tx_queue*/ };
+			                DmaMemToMem_StartBroadcast(lan_dma_streams[i], dests, 1/*2*/);
 			            }
 				    }
 				} // TODO: else try ENCJ?
@@ -228,7 +228,7 @@ void main_loop(void) {
 
 		for (int i = 0; i < LAN_COUNT; i++) {
     		DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
-		    if (lan_dm9051 && lan_dm9051->interrupt_pending && lan_dm9051->dma_ready) {
+		    if (lan_dm9051 && lan_dm9051->interrupt_pending && lan_dm9051->dma_status == DM9051_DMA_READY) {
                 DM9051_ProcessInterrupt(lan_dm9051);
 		    }
 		}
@@ -274,7 +274,7 @@ void main_loop(void) {
 		for (int i = 0; i < LAN_COUNT; i++) {
             DM9051_HandleTypeDef* lan_dm9051 = lan_dm9051_interfaces[i];
             if (lan_dm9051) {
-    			if (lan_dm9051->dma_ready && ElasticQueue_IsLockable(lan_dm9051->lan_tx_queue)) {
+    			if (lan_dm9051->dma_status == DM9051_DMA_READY && ElasticQueue_IsLockable(lan_dm9051->lan_tx_queue)) {
 					DM9051_WritePacket_DMA(lan_dm9051_interfaces[i]);
     			}
 			} // else try ENCJ?
@@ -752,14 +752,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
-void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
-{
-    if(hspi->Instance == SPI1) {
-        DM9051_TxCpltCallback(&hdm9051_1);
-        //Log_Printf("DM9051 TX Cplt\r\n");
-    }
-}
-
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi->Instance == SPI1) {
@@ -776,19 +768,10 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
         //}
     }
 }
-
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
-{
-    if(hspi->Instance == SPI1) {
-        DM9051_RxCpltCallback(&hdm9051_1);
-        //Log_Printf("DM9051 RX Cplt\r\n");
-    }
-}
-
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if(hspi->Instance == SPI1) {
-        DM9051_RxCpltCallback(&hdm9051_1);
+        DM9051_TxRxCpltCallback(&hdm9051_1);
         //Log_Printf("DM9051 TXRX Cplt\r\n");
     }
 }

@@ -35,7 +35,7 @@ static uint8_t DM9051_ReadReg(DM9051_HandleTypeDef *hdm, uint8_t reg) {
 
 void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 {
-  hdm->dma_ready = true;
+  hdm->dma_status = DM9051_DMA_READY;
   hdm->mac_tx_slots = 2; // DM9051 has 2 internal TX SRAM slots
 
   // 1. GPCR: GEP Output
@@ -88,7 +88,7 @@ void DM9051_Init(DM9051_HandleTypeDef *hdm, uint8_t *mac_addr)
 // ================================ WRITE ================================
 
 void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
-    if (!hdm->dma_ready || hdm->mac_tx_slots == 0) {
+    if (hdm->dma_status != DM9051_DMA_READY || hdm->mac_tx_slots == 0) {
         return;
     }
 
@@ -97,6 +97,8 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
     if (ElasticQueue_Lock(hdm->lan_tx_queue, 1, &data, &len) != ELASTIC_QUEUE_OK) {
         return;
     }
+
+    // if (!(DM9051_ReadReg(hdm, DM9051_NSR) & 0x0C)) return;
 
     hdm->mac_tx_slots--;
     
@@ -107,33 +109,14 @@ void DM9051_WritePacket_DMA(DM9051_HandleTypeDef *hdm) {
     HAL_SPI_TransmitReceive(hdm->hspi, &cmd, &cmd_rx, 1, 10);
 
     // 3. Start SPI DMA for the payload
-    hdm->dma_ready = false;
+    hdm->dma_status = DM9051_DMA_TX;
     HAL_SPI_TransmitReceive_DMA(hdm->hspi, data, global_dma_trash_buffer, len);
-}
-
-void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm) {
-    hdm->dma_ready = true;
-
-    // 1. Deassert CS
-    HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
-
-    ElasticQueueRef_t* ref = ElasticQueue_PeekLocked(hdm->lan_tx_queue);
-    if (ref) {
-        // 2. Write TX length
-        DM9051_WriteReg(hdm, DM9051_TXPLL, ref->len & 0xFF);        // TXPLL
-        DM9051_WriteReg(hdm, DM9051_TXPLH, (ref->len >> 8) & 0xFF); // TXPLH
-
-        // 3. Issue TX request
-        DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
-
-        ElasticQueue_Done(hdm->lan_tx_queue);
-    }
 }
 
 // ================================ INTERRUPT ================================
 
 void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
-    if (!hdm->interrupt_pending || !hdm->dma_ready) {
+    if (!hdm->interrupt_pending || hdm->dma_status != DM9051_DMA_READY) {
         return;
     }
 
@@ -199,7 +182,7 @@ void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm) {
 // ================================ READ ================================
 
 void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
-    if (!hdm->dma_ready) {
+    if (hdm->dma_status != DM9051_DMA_READY) {
         return;
     }
 
@@ -260,7 +243,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         hdm->current_rx_packet = ElasticQueue_Allocate(hdm->lan_rx_queue, rxlen);
     }
     if (hdm->lan_rx_queue && hdm->current_rx_packet) {
-        hdm->dma_ready = false;
+        hdm->dma_status = DM9051_DMA_RX;
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
         uint8_t cmd_rx;
@@ -269,7 +252,7 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
         //Log_Printf("HAL_SPI_TransmitReceive_DMA! %d (NORMAL)\r\n", ++start_count);
     } else {
         // Drop packet using DMA to a global trash buffer to save CPU cycles
-        hdm->dma_ready = false;
+        hdm->dma_status = DM9051_DMA_RX;
         
         HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_RESET);
         uint8_t cmd = DM9051_MRCMD;
@@ -282,20 +265,37 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm) {
     }
 }
 
-// IRQ on end of transfer of Ethernet packet payload over SPI1 using DMA.
-void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm) {
-    //Log_Printf("DM9051_RxCpltCallback! %d (FREE)\r\n", ++end_count);
+// ================================ SPI DMA Callback ================================
 
-    hdm->dma_ready = true;
+// IRQ on end of transfer of Ethernet packet payload over SPI1 using DMA.
+void DM9051_TxRxCpltCallback(DM9051_HandleTypeDef *hdm) {
+	bool is_tx_callback = hdm->dma_status == DM9051_DMA_TX;
+    hdm->dma_status = DM9051_DMA_READY;
 
     // 1. Deassert CS
     HAL_GPIO_WritePin(hdm->cs_port, hdm->cs_pin, GPIO_PIN_SET);
-    
-    // 2. Clear MRCMD and Packet Received Interrupt
-    DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // ISR_STOP_MRCMD | ISR_PRS
-    
-    if (hdm->lan_rx_queue && hdm->current_rx_packet) {
-        ElasticQueue_Commit(hdm->lan_rx_queue, hdm->current_rx_packet);
-        hdm->current_rx_packet = NULL;
+
+    if (is_tx_callback) {
+    	// TX done
+        ElasticQueueRef_t* ref = ElasticQueue_PeekLocked(hdm->lan_tx_queue);
+        if (ref) {
+            // 2. Write TX length
+            DM9051_WriteReg(hdm, DM9051_TXPLL, ref->len & 0xFF);        // TXPLL
+            DM9051_WriteReg(hdm, DM9051_TXPLH, (ref->len >> 8) & 0xFF); // TXPLH
+
+            // 3. Issue TX request
+            DM9051_WriteReg(hdm, DM9051_TCR, 0x01); // TCR_TXREQ
+
+            ElasticQueue_Done(hdm->lan_tx_queue);
+        }
+    } else {
+    	// RX done
+        // 2. Clear MRCMD and Packet Received Interrupt
+        DM9051_WriteReg(hdm, DM9051_ISR, DM9051_ISR_IOMODE | DM9051_ISR_PRS); // ISR_STOP_MRCMD | ISR_PRS
+
+        if (hdm->lan_rx_queue && hdm->current_rx_packet) {
+            ElasticQueue_Commit(hdm->lan_rx_queue, hdm->current_rx_packet);
+            hdm->current_rx_packet = NULL;
+        }
     }
 }

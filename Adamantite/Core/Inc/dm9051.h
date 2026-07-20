@@ -56,6 +56,10 @@
 #define DM9051_IMR_UDRUNM    0x40 // Transmit Under Run Mask
 #define DM9051_IMR_PAR       0x80 // Pointer Auto Return
 
+#define DM9051_DMA_READY     0x00 // Packet Received Mask
+#define DM9051_DMA_RX        0x01 // Packet Transmitted Mask
+#define DM9051_DMA_TX        0x02 // Receive Overflow Mask
+
 typedef struct {
     SPI_HandleTypeDef* hspi;
     DMA_HandleTypeDef* hdma_rx;
@@ -76,7 +80,7 @@ typedef struct {
     // However DM9051 doesn't support that, so we have to alternate.
     // Moreover, we have to use both RX and TX to avoid SPI error HAL_SPI_ERROR_OVR.
     // That's why logically it's pretty much the same DMA.
-    bool dma_ready;
+    uint8_t dma_status;
 } DM9051_HandleTypeDef;
 
 uint16_t DM9051_ReadPHY(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin, uint8_t phy_reg);
@@ -87,8 +91,9 @@ void DM9051_ReadPacket_DMA_Start(DM9051_HandleTypeDef *hdm);
 void DM9051_ProcessInterrupt(DM9051_HandleTypeDef *hdm);
 
 // To be called from HAL_SPI_TxCpltCallback
-void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm);
+//void DM9051_TxCpltCallback(DM9051_HandleTypeDef *hdm);
 // To be called from HAL_SPI_RxCpltCallback
-void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm);
+//void DM9051_RxCpltCallback(DM9051_HandleTypeDef *hdm);
+void DM9051_TxRxCpltCallback(DM9051_HandleTypeDef *hdm);
 
 #endif /* __DM9051_H */
